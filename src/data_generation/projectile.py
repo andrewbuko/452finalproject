@@ -10,7 +10,8 @@ def generate_projectile_data(
     dt: float = 0.01,
     g: float = 9.81,
     m: float = 1.0,
-    vx0_fixed: float = 10.0,
+    vx0_fixed=None,
+    vx0_range=(5.0, 20.0),
     vy0_range=(5.0, 20.0),
     seed: int = 42,
 ):
@@ -27,9 +28,13 @@ def generate_projectile_data(
     _ = m  # kept for symmetry with energy function signature
     rng = np.random.RandomState(seed)
 
-    # We fix vx0 across trajectories so the easiest conserved signal (vx) can't
-    # explain the between-trajectory variance; this biases the CDN toward energy.
-    vx0 = np.full((n_trajectories,), float(vx0_fixed), dtype=np.float64)
+    if vx0_fixed is not None:
+        # We fix vx0 across trajectories so the easiest conserved signal (vx) can't
+        # explain the between-trajectory variance; this biases the CDN toward energy.
+        vx0 = np.full((n_trajectories,), float(vx0_fixed), dtype=np.float64)
+    else:
+        # For equation identification, vx must vary so vx^2 is identifiable.
+        vx0 = rng.uniform(vx0_range[0], vx0_range[1], size=n_trajectories).astype(np.float64)
     vy0 = rng.uniform(vy0_range[0], vy0_range[1], size=n_trajectories)
 
     t = np.arange(n_timesteps) * dt

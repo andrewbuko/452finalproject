@@ -9,14 +9,14 @@ warnings.filterwarnings("ignore", message="torch was imported before juliacall")
 
 from src.data_generation.pendulum import compute_energy_pendulum
 from src.data_generation.projectile import compute_energy_projectile
-from src.evaluation.sparse_regression import LassoConfig, fit_lasso, format_equation
+from src.data_generation.projectile import generate_projectile_data
+from src.evaluation.sparse_regression import LassoConfig, drop_near_constant_columns, fit_lasso, format_equation
 from src.evaluation.sindy import STLSQConfig, format_sparse_equation, sindy_fit_energy
 from src.evaluation.symbolic_regression import (
     analyze_discovered_equations,
     best_equation_string,
     discover_equation_pysr,
     pysr_available,
-    sample_states_and_targets,
     validate_discovered_equation,
 )
 from src.models.cdn import ConservationDiscoveryNetwork
@@ -37,14 +37,17 @@ def _eval_cdn(model, X: np.ndarray, device: str) -> np.ndarray:
 
 
 def run_projectile(device: str):
-    traj = np.load("data/projectile/trajectories.npy")  # RAW (unnormalized)
+    # For equation identification, vx0 MUST vary across trajectories so vx^2 is identifiable.
+    # We generate a separate raw dataset here without touching the CDN dataset on disk.
+    traj = generate_projectile_data(vx0_fixed=None, vx0_range=(5.0, 20.0), vy0_range=(5.0, 20.0), seed=123)
     flat = traj.reshape(-1, 4)
     E = compute_energy_projectile(traj).reshape(-1)
 
     print("\nLASSO (sparse regression) — PROJECTILE (target = analytical energy)")
     Theta, names = build_library_projectile(flat)
-    w, b, _scaler = fit_lasso(Theta[:, 1:], E, LassoConfig(alpha=5e-4))  # drop constant column; keep intercept separately
-    print(format_equation(names[1:], w, intercept=b, threshold=1e-2))
+    Theta_nc, names_nc, _keep = drop_near_constant_columns(Theta[:, 1:], names[1:], std_eps=1e-10)
+    w, b, _scaler = fit_lasso(Theta_nc, E, LassoConfig(use_cv=True, cv_folds=5))
+    print(format_equation(names_nc, w, intercept=b, threshold=1e-2))
     print("Known: E = 0.5*vx^2 + 0.5*vy^2 + 9.81*y")
 
     # SINDy-style sparse regression on energy (library + STLSQ pruning)
@@ -57,17 +60,15 @@ def run_projectile(device: str):
     print("\nSINDy (STLSQ) — PROJECTILE (target = analytical energy)")
     print(format_sparse_equation(names_s, w_s, threshold=0.01))
 
-    if not pysr_available():
+    run_pysr = os.environ.get("RUN_PYSR", "0") == "1"
+    if (not run_pysr) or (not pysr_available()):
         print("\nPYSR — PROJECTILE")
-        print("PySR not available (requires PySR + Julia). Skipping symbolic regression.")
+        print("Skipping PySR (set RUN_PYSR=1 to enable; requires Julia).")
         return
 
     # PySR using analytical energy target
-    X_e, y_e = sample_states_and_targets(
-        traj,
-        n_samples=10_000,
-        target_fn=lambda X: (0.5 * (X[:, 2] ** 2 + X[:, 3] ** 2) + 9.81 * X[:, 1]),
-    )
+    X_e = flat[np.random.RandomState(1).choice(flat.shape[0], size=10_000, replace=False)]
+    y_e = (0.5 * (X_e[:, 2] ** 2 + X_e[:, 3] ** 2) + 9.81 * X_e[:, 1])
     reg_e = discover_equation_pysr(
         X=X_e,
         y=y_e,
@@ -86,9 +87,10 @@ def run_projectile(device: str):
     y_c = _eval_cdn(cdn, X_c, device=device)
     # LASSO distillation
     Theta_c, names_c = build_library_projectile(X_c)
-    w_c, b_c, _ = fit_lasso(Theta_c[:, 1:], y_c, LassoConfig(alpha=5e-4))
+    Theta_c_nc, names_c_nc, _ = drop_near_constant_columns(Theta_c[:, 1:], names_c[1:], std_eps=1e-10)
+    w_c, b_c, _ = fit_lasso(Theta_c_nc, y_c, LassoConfig(use_cv=True, cv_folds=5))
     print("\nLASSO — PROJECTILE (target = CDN output)")
-    print(format_equation(names_c[1:], w_c, intercept=b_c, threshold=1e-2))
+    print(format_equation(names_c_nc, w_c, intercept=b_c, threshold=1e-2))
     reg_c = discover_equation_pysr(
         X=X_c,
         y=y_c,
@@ -116,8 +118,9 @@ def run_pendulum(device: str):
 
     print("\nLASSO (sparse regression) — PENDULUM (target = analytical energy)")
     Theta, names = build_library_pendulum(flat)
-    w, b, _ = fit_lasso(Theta[:, 1:], E, LassoConfig(alpha=5e-4))
-    print(format_equation(names[1:], w, intercept=b, threshold=1e-2))
+    Theta_nc, names_nc, _keep = drop_near_constant_columns(Theta[:, 1:], names[1:], std_eps=1e-10)
+    w, b, _ = fit_lasso(Theta_nc, E, LassoConfig(use_cv=True, cv_folds=5))
+    print(format_equation(names_nc, w, intercept=b, threshold=1e-2))
     print("Known: H = 0.5*omega^2 - 9.81*cos(theta)")
 
     w_s, names_s = sindy_fit_energy(
@@ -129,16 +132,14 @@ def run_pendulum(device: str):
     print("\nSINDy (STLSQ) — PENDULUM (target = analytical energy)")
     print(format_sparse_equation(names_s, w_s, threshold=0.01))
 
-    if not pysr_available():
+    run_pysr = os.environ.get("RUN_PYSR", "0") == "1"
+    if (not run_pysr) or (not pysr_available()):
         print("\nPYSR — PENDULUM")
-        print("PySR not available (requires PySR + Julia). Skipping symbolic regression.")
+        print("Skipping PySR (set RUN_PYSR=1 to enable; requires Julia).")
         return
 
-    X_e, y_e = sample_states_and_targets(
-        traj,
-        n_samples=10_000,
-        target_fn=lambda X: compute_energy_pendulum(X.reshape(-1, 1, 2)).reshape(-1),
-    )
+    X_e = flat[np.random.RandomState(1).choice(flat.shape[0], size=10_000, replace=False)]
+    y_e = compute_energy_pendulum(X_e.reshape(-1, 1, 2)).reshape(-1)
     reg_e = discover_equation_pysr(
         X=X_e,
         y=y_e,
@@ -155,9 +156,10 @@ def run_pendulum(device: str):
     X_c = flat[np.random.RandomState(0).choice(flat.shape[0], size=10_000, replace=False)]
     y_c = _eval_cdn(cdn, X_c, device=device)
     Theta_c, names_c = build_library_pendulum(X_c)
-    w_c, b_c, _ = fit_lasso(Theta_c[:, 1:], y_c, LassoConfig(alpha=5e-4))
+    Theta_c_nc, names_c_nc, _ = drop_near_constant_columns(Theta_c[:, 1:], names_c[1:], std_eps=1e-10)
+    w_c, b_c, _ = fit_lasso(Theta_c_nc, y_c, LassoConfig(use_cv=True, cv_folds=5))
     print("\nLASSO — PENDULUM (target = CDN output)")
-    print(format_equation(names_c[1:], w_c, intercept=b_c, threshold=1e-2))
+    print(format_equation(names_c_nc, w_c, intercept=b_c, threshold=1e-2))
     reg_c = discover_equation_pysr(
         X=X_c,
         y=y_c,

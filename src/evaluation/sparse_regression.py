@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 import numpy as np
-from sklearn.linear_model import Lasso
+from sklearn.linear_model import Lasso, LassoCV
 from sklearn.preprocessing import StandardScaler
 
 
@@ -13,6 +13,9 @@ class LassoConfig:
     alpha: float = 1e-3
     max_iter: int = 50_000
     fit_intercept: bool = True
+    use_cv: bool = True
+    cv_folds: int = 5
+    alphas: np.ndarray | None = None
 
 
 def fit_lasso(Theta: np.ndarray, y: np.ndarray, cfg: LassoConfig) -> Tuple[np.ndarray, float, StandardScaler]:
@@ -27,7 +30,16 @@ def fit_lasso(Theta: np.ndarray, y: np.ndarray, cfg: LassoConfig) -> Tuple[np.nd
     scaler = StandardScaler(with_mean=True, with_std=True)
     Theta_s = scaler.fit_transform(Theta)
 
-    model = Lasso(alpha=cfg.alpha, fit_intercept=cfg.fit_intercept, max_iter=cfg.max_iter)
+    if cfg.use_cv:
+        model = LassoCV(
+            alphas=cfg.alphas,
+            cv=cfg.cv_folds,
+            fit_intercept=cfg.fit_intercept,
+            max_iter=cfg.max_iter,
+            n_jobs=None,
+        )
+    else:
+        model = Lasso(alpha=cfg.alpha, fit_intercept=cfg.fit_intercept, max_iter=cfg.max_iter)
     model.fit(Theta_s, y)
 
     # Convert coefficients back to original Theta units
@@ -37,6 +49,13 @@ def fit_lasso(Theta: np.ndarray, y: np.ndarray, cfg: LassoConfig) -> Tuple[np.nd
     # When using standardized features, intercept corresponds to y - sum(w_scaled * mean_s)
     # but since StandardScaler centers, sklearn handles it; we keep intercept as-is.
     return w, intercept, scaler
+
+
+def drop_near_constant_columns(Theta: np.ndarray, names: List[str], std_eps: float = 1e-10):
+    Theta = np.asarray(Theta, dtype=np.float64)
+    std = Theta.std(axis=0)
+    keep = std > std_eps
+    return Theta[:, keep], [n for n, k in zip(names, keep.tolist()) if k], keep
 
 
 def format_equation(names: List[str], w: np.ndarray, intercept: float = 0.0, threshold: float = 1e-2) -> str:

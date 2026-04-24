@@ -1,0 +1,11 @@
+Complexity,Loss,Equation
+1,9.680386,"-5.560958"
+4,5.8313165,"cos(theta) * -7.168934"
+6,4.747372,"square(omega * theta) + -7.1210027"
+7,3.685125,"(cos(theta) * -7.1662817) - cos(omega)"
+8,3.2258053,"(square(omega) + -12.598234) * square(cos(theta))"
+9,2.2573592e-13,"(cos(theta) * -9.81) + (square(omega) * 0.5)"
+11,1.9373447e-13,"(cos(theta) + ((square(omega) * -0.050968394) + -4.472714e-8)) * -9.81"
+14,1.5474811e-13,"((square(omega) * 0.5) + (cos(theta) * -1.9538112)) + (cos(theta) * -7.856189)"
+16,1.4774609e-13,"((cos(-5.4081106e-8 - theta) * -1.8479347) + (square(omega) * 0.5)) + (cos(theta) * -7.962065)"
+18,1.4595534e-13,"(((square(omega) * 0.5) + (cos(theta + -5.4081106e-8) * -1.8479347)) + -5.0916693e-8) + (cos(theta) * -7.962065)"

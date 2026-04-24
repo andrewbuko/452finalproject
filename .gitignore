@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+*.egg-info/
+.ipynb_checkpoints/
+*.swp
+data/**/*.npy
+models/**/*.pt
+models/**/*.npz
+models/**/*_history.npy
+figures/*.png

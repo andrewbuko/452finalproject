@@ -9,6 +9,7 @@ warnings.filterwarnings("ignore", message="torch was imported before juliacall")
 
 from src.data_generation.pendulum import compute_energy_pendulum
 from src.data_generation.projectile import compute_energy_projectile
+from src.evaluation.sparse_regression import LassoConfig, fit_lasso, format_equation
 from src.evaluation.sindy import STLSQConfig, format_sparse_equation, sindy_fit_energy
 from src.evaluation.symbolic_regression import (
     analyze_discovered_equations,
@@ -19,7 +20,7 @@ from src.evaluation.symbolic_regression import (
     validate_discovered_equation,
 )
 from src.models.cdn import ConservationDiscoveryNetwork
-from src.training.train_polynomial_cdn import PolyTrainConfig, train_polynomial_cdn
+from src.evaluation.sindy import build_library_pendulum, build_library_projectile
 
 
 def _load_cdn(ckpt_path: str, state_dim: int, device: str):
@@ -37,33 +38,18 @@ def _eval_cdn(model, X: np.ndarray, device: str) -> np.ndarray:
 
 def run_projectile(device: str):
     traj = np.load("data/projectile/trajectories.npy")  # RAW (unnormalized)
-    energy0 = compute_energy_projectile(traj)[:, 0]
+    flat = traj.reshape(-1, 4)
+    E = compute_energy_projectile(traj).reshape(-1)
 
-    print("\nPOLYNOMIAL MODEL — PROJECTILE")
-    poly = train_polynomial_cdn(
-        traj,
-        PolyTrainConfig(
-            env_name="projectile",
-            lr=1e-3,
-            epochs=120,
-            log_every=20,
-            lambda_energy=1.0,
-            l1_weight=5e-3,
-            grad_clip=1.0,
-        ),
-        energy0_np=energy0,
-    )
-    print(poly.print_equation(threshold=0.01))
+    print("\nLASSO (sparse regression) — PROJECTILE (target = analytical energy)")
+    Theta, names = build_library_projectile(flat)
+    w, b, _scaler = fit_lasso(Theta[:, 1:], E, LassoConfig(alpha=5e-4))  # drop constant column; keep intercept separately
+    print(format_equation(names[1:], w, intercept=b, threshold=1e-2))
     print("Known: E = 0.5*vx^2 + 0.5*vy^2 + 9.81*y")
 
     # SINDy-style sparse regression on energy (library + STLSQ pruning)
-    X_s, y_s = sample_states_and_targets(
-        traj,
-        n_samples=10_000,
-        target_fn=lambda X: (0.5 * (X[:, 2] ** 2 + X[:, 3] ** 2) + 9.81 * X[:, 1]),
-    )
     w_s, names_s = sindy_fit_energy(
-        X_s,
+        flat,
         energy_fn=lambda X: (0.5 * (X[:, 2] ** 2 + X[:, 3] ** 2) + 9.81 * X[:, 1]),
         env_name="projectile",
         cfg=STLSQConfig(threshold=0.05, max_iter=15, normalize_columns=True),
@@ -96,8 +82,13 @@ def run_projectile(device: str):
 
     # PySR distillation of the CDN output
     cdn = _load_cdn("models/cdn_projectile_best.pt", 4, device)
-    X_c, _ = sample_states_and_targets(traj, n_samples=10_000, target_fn=lambda X: X[:, 0] * 0.0)
+    X_c = flat[np.random.RandomState(0).choice(flat.shape[0], size=10_000, replace=False)]
     y_c = _eval_cdn(cdn, X_c, device=device)
+    # LASSO distillation
+    Theta_c, names_c = build_library_projectile(X_c)
+    w_c, b_c, _ = fit_lasso(Theta_c[:, 1:], y_c, LassoConfig(alpha=5e-4))
+    print("\nLASSO — PROJECTILE (target = CDN output)")
+    print(format_equation(names_c[1:], w_c, intercept=b_c, threshold=1e-2))
     reg_c = discover_equation_pysr(
         X=X_c,
         y=y_c,
@@ -120,32 +111,17 @@ def run_projectile(device: str):
 
 def run_pendulum(device: str):
     traj = np.load("data/pendulum/trajectories.npy")  # RAW (unnormalized)
-    energy0 = compute_energy_pendulum(traj)[:, 0]
+    flat = traj.reshape(-1, 2)
+    E = compute_energy_pendulum(traj).reshape(-1)
 
-    print("\nPOLYNOMIAL MODEL — PENDULUM")
-    poly = train_polynomial_cdn(
-        traj,
-        PolyTrainConfig(
-            env_name="pendulum",
-            lr=1e-3,
-            epochs=160,
-            log_every=20,
-            lambda_energy=1.0,
-            l1_weight=5e-3,
-            grad_clip=1.0,
-        ),
-        energy0_np=energy0,
-    )
-    print(poly.print_equation(threshold=0.01))
+    print("\nLASSO (sparse regression) — PENDULUM (target = analytical energy)")
+    Theta, names = build_library_pendulum(flat)
+    w, b, _ = fit_lasso(Theta[:, 1:], E, LassoConfig(alpha=5e-4))
+    print(format_equation(names[1:], w, intercept=b, threshold=1e-2))
     print("Known: H = 0.5*omega^2 - 9.81*cos(theta)")
 
-    X_s, y_s = sample_states_and_targets(
-        traj,
-        n_samples=10_000,
-        target_fn=lambda X: compute_energy_pendulum(X.reshape(-1, 1, 2)).reshape(-1),
-    )
     w_s, names_s = sindy_fit_energy(
-        X_s,
+        flat,
         energy_fn=lambda X: compute_energy_pendulum(X.reshape(-1, 1, 2)).reshape(-1),
         env_name="pendulum",
         cfg=STLSQConfig(threshold=0.05, max_iter=15, normalize_columns=True),
@@ -176,8 +152,12 @@ def run_pendulum(device: str):
     analyze_discovered_equations(reg_e, save_path="figures/pysr_pareto_pendulum_energy.png")
 
     cdn = _load_cdn("models/cdn_pendulum_best.pt", 2, device)
-    X_c, _ = sample_states_and_targets(traj, n_samples=10_000, target_fn=lambda X: X[:, 0] * 0.0)
+    X_c = flat[np.random.RandomState(0).choice(flat.shape[0], size=10_000, replace=False)]
     y_c = _eval_cdn(cdn, X_c, device=device)
+    Theta_c, names_c = build_library_pendulum(X_c)
+    w_c, b_c, _ = fit_lasso(Theta_c[:, 1:], y_c, LassoConfig(alpha=5e-4))
+    print("\nLASSO — PENDULUM (target = CDN output)")
+    print(format_equation(names_c[1:], w_c, intercept=b_c, threshold=1e-2))
     reg_c = discover_equation_pysr(
         X=X_c,
         y=y_c,

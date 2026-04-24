@@ -65,6 +65,12 @@ Outputs (examples):
 - `figures/pysr_pareto_projectile_cdn.png`, `figures/pysr_pareto_pendulum_cdn.png`
 - `figures/equation_validation_projectile.png`, `figures/equation_validation_pendulum.png`
 
+If PySR/Julia is finicky on your machine or cluster, run the PySR-only script (no torch import):
+
+```powershell
+python -m scripts.run_pysr_energy_only
+```
+
 ## Probing (1D sweeps)
 
 This probes the learned invariant by sweeping one input dimension at a time.
@@ -82,6 +88,56 @@ Runs the whole pipeline with skip-if-exists logic:
 
 ```powershell
 python -m scripts.run_all
+```
+
+## Running on a server/cluster (git push here → pull there)
+
+- **On your laptop (this repo)**:
+
+```powershell
+git status
+git add .
+git commit -m "update equation discovery pipeline"
+git push
+```
+
+- **On the cluster login node**:
+
+```bash
+git clone <your-repo-url>
+cd 452finalproject
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+- **Run jobs**:
+  - **CPU equation discovery** (fast, no Julia required):
+
+```bash
+python -m scripts.run_equation_discovery
+```
+
+  - **PySR (Julia)**:
+    - Make sure Julia is available (module/juliaup). Then run:
+
+```bash
+python -m scripts.run_pysr_energy_only
+```
+
+- **SLURM example** (`run_job.sh`):
+
+```bash
+#!/bin/bash
+#SBATCH -J eqdisc
+#SBATCH -c 8
+#SBATCH --mem=16G
+#SBATCH -t 02:00:00
+
+set -euo pipefail
+cd /path/to/452finalproject
+source venv/bin/activate
+python -m scripts.run_equation_discovery
 ```
 
 ## References

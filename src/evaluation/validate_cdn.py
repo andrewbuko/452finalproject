@@ -73,3 +73,24 @@ def validate_cdn(
     print(f"Saved {out_path}")
     return r2
 
+
+def validate_conservation_model(
+    model,
+    trajs_np,
+    energy_fn_np,
+    env_name,
+    model_name="CDN",
+    save_dir="figures",
+    n_samples=10000,
+    device=None,
+):
+    """
+    Compatibility wrapper used by scripts/run_all.py.
+    Returns a dict with r_squared and spearman (spearman omitted here for simplicity).
+    """
+    _ = save_dir  # validate_cdn writes to figures/ already
+    if device is not None:
+        model = model.to(device)
+    r2 = validate_cdn(model, trajs_np, energy_fn_np, env_name, n_samples=n_samples)
+    return {"r_squared": float(r2), "spearman": 0.0, "model_name": str(model_name)}
+

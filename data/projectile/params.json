@@ -1,19 +1,25 @@
 {
+  "environment": "projectile",
   "g": 9.81,
   "m": 1.0,
   "dt": 0.01,
-  "n_trajectories": 10000,
+  "n_trajectories": 2000,
   "n_timesteps": 100,
-  "vx0_fixed": 10.0,
-  "vy0_range": [
+  "v0_range": [
     5.0,
     20.0
   ],
+  "angle_range_deg": [
+    15.0,
+    75.0
+  ],
+  "seed": 42,
   "state_dim": 4,
   "state_labels": [
     "x",
     "y",
     "vx",
     "vy"
-  ]
+  ],
+  "known_energy": "0.5*(vx^2 + vy^2) + 9.81*y"
 }

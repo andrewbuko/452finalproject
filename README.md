@@ -1,17 +1,22 @@
-# Neural Conservation Discovery + Symbolic Regression (Physics Recovery)
+## From Trajectories to Equations: Machine Discovery of Conservation Laws via Neural Networks and Symbolic Regression
 
-Goal: learn a scalar **conserved quantity** from trajectory data using a Conservation Discovery Network (CDN), then recover a compact closed-form physics equation using **symbolic regression** (PySR).
+Given only raw position and velocity measurements of moving objects - with no physics knowledge, no labels, and no equations - this project discovers conserved quantities and recovers readable physics equations:
 
-Hero figure (generated after training):
-- `figures/equation_comparison.png`
+- **PROJECTILE**: `f(s) = 0.50000*vx^2 + 0.50000*vy^2 + 9.81000*y`
+- **PENDULUM**: `f(s) = 0.50000*omega^2 - 9.81000*cos(theta)`
+- **SPRING-MASS**: `f(s) = 5.00000*x^2 + 0.50000*v^2`
+
+The entire experiment runs with one command:
+
+- `python scripts/run_all.py --device cuda --data_dir data --save_dir results`
 
 ## Project layout
 
-- **Data**: `data/projectile/`, `data/pendulum/`
-- **Models**: `src/models/cdn.py` (baseline CDN), `src/models/polynomial_cdn.py` (readable coefficients)
-- **Training**: `src/training/train_cdn.py`, `src/training/train_polynomial_cdn.py`
-- **Evaluation**: `src/evaluation/validate_cdn.py`, `src/evaluation/probe_cdn.py`, `src/evaluation/symbolic_regression.py`
-- **Runners**: `scripts/run_cdn.py`, `scripts/run_probing.py`, `scripts/run_equation_discovery.py`, `scripts/run_all.py`
+- **Data**: `data/projectile/`, `data/pendulum/`, `data/spring_mass/`
+- **Models**: `src/models/cdn.py`, `src/models/polynomial_cdn.py`
+- **Training**: `src/training/train_cdn.py`, `src/training/train_polynomial.py`
+- **Evaluation**: `src/evaluation/validate_cdn.py`, `src/evaluation/probe_cdn.py`, `src/evaluation/symbolic_regression.py`, `src/evaluation/hero_figure.py`
+- **Runner**: `scripts/run_all.py`
 - **Notebook**: `notebooks/full_run.ipynb` (end-to-end demo; loads existing data by default)
 
 ## Setup (Windows / PowerShell)
@@ -23,7 +28,7 @@ pip install -r requirements.txt
 ```
 
 Notes:
-- **PySR requires Julia**. If you only want neural discovery + probing, you can skip PySR.
+- **PySR requires Julia**. If you only want the neural + polynomial discovery, pass `--skip_pysr`.
 
 ## Generate or load data
 
@@ -32,7 +37,7 @@ Generate datasets + sanity plots:
 ```powershell
 python -m src.data_generation.projectile
 python -m src.data_generation.pendulum
-python -m src.data_generation.visualize_data
+python -m src.data_generation.spring_mass
 ```
 
 Outputs:

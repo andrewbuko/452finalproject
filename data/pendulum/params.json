@@ -1,13 +1,24 @@
 {
+  "environment": "pendulum",
   "g": 9.81,
   "l": 1.0,
   "m": 1.0,
   "dt": 0.01,
-  "n_trajectories": 10000,
+  "n_trajectories": 2000,
   "n_timesteps": 100,
+  "theta0_range": [
+    -1.5707963267948966,
+    1.5707963267948966
+  ],
+  "omega0_range": [
+    -2.0,
+    2.0
+  ],
+  "seed": 42,
   "state_dim": 2,
   "state_labels": [
     "theta",
     "omega"
-  ]
+  ],
+  "known_energy": "0.5*omega^2 - 9.81*cos(theta)"
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import torch
@@ -9,6 +10,94 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.models.cdn import ConservationDiscoveryNetwork
+
+
+def conservation_loss(model, trajectories, lambda_var=0.1, epsilon=1.0):
+    """
+    Compute conservation loss.
+    Temporal consistency: f(s_t) ~= f(s_{t+1})
+    Variance regularizer: avoid trivial constant outputs
+    """
+    B, T, D = trajectories.shape
+    states = trajectories.reshape(B * T, D)
+    f_vals = model(states).reshape(B, T)
+    diffs = f_vals[:, 1:] - f_vals[:, :-1]
+    consistency = (diffs**2).mean()
+    f_initial = f_vals[:, 0]
+    variance = f_initial.var(unbiased=False)
+    var_penalty = torch.relu(torch.as_tensor(epsilon, device=variance.device, dtype=variance.dtype) - variance)
+    total = consistency + lambda_var * var_penalty
+    return total, float(consistency.detach().cpu().item()), float(variance.detach().cpu().item())
+
+
+def train_conservation_model(
+    model,
+    trajectories_np,
+    save_path,
+    lr=1e-3,
+    epochs=400,
+    batch_size=512,
+    lambda_var=0.5,
+    epsilon=10.0,
+    device=None,
+    model_name="model",
+):
+    """
+    Train any conservation model (CDN or PolynomialConservation).
+    trajectories_np is normalized for CDN, RAW for polynomial.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    trajs_tensor = torch.tensor(trajectories_np, dtype=torch.float32, device=device)
+    dataset = TensorDataset(trajs_tensor)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+    history = {"loss": [], "consistency": [], "variance": []}
+    best_loss = float("inf")
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+
+    for epoch in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        epoch_con = 0.0
+        epoch_var = 0.0
+        n_batches = 0
+        for (batch,) in loader:
+            optimizer.zero_grad(set_to_none=True)
+            loss, con, var = conservation_loss(model, batch, lambda_var, epsilon)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            epoch_loss += float(loss.detach().cpu().item())
+            epoch_con += con
+            epoch_var += var
+            n_batches += 1
+        scheduler.step()
+
+        avg_loss = epoch_loss / max(1, n_batches)
+        avg_con = epoch_con / max(1, n_batches)
+        avg_var = epoch_var / max(1, n_batches)
+        history["loss"].append(avg_loss)
+        history["consistency"].append(avg_con)
+        history["variance"].append(avg_var)
+
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            torch.save(model.state_dict(), save_path)
+
+        if (epoch + 1) % 50 == 0:
+            print(
+                f"[{model_name}] epoch {epoch+1:4d}/{epochs} "
+                f"loss={avg_loss:.6f} (best={best_loss:.6f}) cons={avg_con:.6f} var={avg_var:.6f}"
+            )
+
+    model.load_state_dict(torch.load(save_path, map_location=device))
+    hist_path = save_path.replace(".pt", "_history.npy")
+    np.save(hist_path, history)
+    return model, history
 
 
 @dataclass
@@ -34,13 +123,13 @@ class CDNTrainConfig:
     log_grad_norm: bool = False
     log_every: int = 10
     save_dir: str = "models"
-    device: str | None = None
+    device: Optional[str] = None
 
 
 def cdn_loss(
     model: ConservationDiscoveryNetwork,
     trajectories: torch.Tensor,
-    energy0: torch.Tensor | None = None,
+    energy0: Optional[torch.Tensor] = None,
     lambda_var: float = 0.1,
     epsilon: float = 1.0,
     var_reg: str = "hinge",
@@ -119,7 +208,7 @@ def cdn_loss(
     )
 
 
-def train_cdn(trajectories_np: np.ndarray, cfg: CDNTrainConfig, energy0_np: np.ndarray | None = None):
+def train_cdn(trajectories_np: np.ndarray, cfg: CDNTrainConfig, energy0_np: Optional[np.ndarray] = None):
     if cfg.device is None:
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = cfg.device

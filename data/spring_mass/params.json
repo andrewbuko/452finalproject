@@ -1,0 +1,15 @@
+{
+  "environment": "spring_mass",
+  "k": 10.0,
+  "m": 1.0,
+  "dt": 0.01,
+  "n_trajectories": 2000,
+  "n_timesteps": 100,
+  "state_dim": 2,
+  "state_labels": [
+    "x",
+    "v"
+  ],
+  "known_energy": "5.0*x^2 + 0.5*v^2",
+  "seed": 42
+}

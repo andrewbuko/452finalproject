@@ -264,7 +264,10 @@ def main(args):
             X = flat[rng.choice(flat.shape[0], size=n, replace=False)]
 
             def energy_on_states(X2d: np.ndarray) -> np.ndarray:
-                return env["energy"](X2d.reshape(1, 1, -1)).reshape(-1)
+                # X2d is (N, D). The env energy function expects (N, T, D),
+                # so treat each state as a length-1 trajectory.
+                X3d = X2d.reshape(-1, 1, env["state_dim"])
+                return env["energy"](X3d)[:, 0].reshape(-1)
 
             w_s, names_s = sindy_fit_energy(
                 X,
@@ -280,7 +283,8 @@ def main(args):
         # Phase 5: PySR (optional)
         if not args.skip_pysr:
             def target_energy(states_2d):
-                return env["energy"](states_2d.reshape(1, 1, -1)).flatten()
+                X3d = np.asarray(states_2d).reshape(-1, 1, env["state_dim"])
+                return env["energy"](X3d)[:, 0].reshape(-1)
 
             _, pysr_best = run_symbolic_regression(
                 trajs,

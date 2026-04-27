@@ -9,6 +9,8 @@ results/
 *.log
 julia_project/
 .SymbolicRegression.jl/
+outputs/
+scripts/__pycache__/
 data/**/*.npy
 models/**/*.pt
 models/**/*.npz

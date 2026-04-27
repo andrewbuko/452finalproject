@@ -41,9 +41,11 @@ def main(args):
     from src.evaluation.probe_cdn import probe_all_dimensions
     from src.evaluation.symbolic_regression import run_symbolic_regression
     from src.evaluation.validate_cdn import validate_conservation_model
+    from src.evaluation.sindy import STLSQConfig, format_sparse_equation, sindy_fit_energy
     from src.models.cdn import ConservationDiscoveryNetwork
     from src.training.train_cdn import train_conservation_model
     from src.training.train_polynomial import train_polynomial_model
+    from src.training.train_structured_energy import StructuredEnergyConfig, train_structured_energy
 
     ENVIRONMENTS = [
         {
@@ -154,6 +156,35 @@ def main(args):
         )
         all_results[f"cdn_{env['name']}"] = cdn_val
 
+        # Phase 2b: Structured Energy Network baseline (optional)
+        if args.run_structured_energy:
+            print("Training structured energy network (RAW)...")
+            if env["name"] == "projectile":
+                pos_dims, vel_dims = [0, 1], [2, 3]
+            elif env["name"] == "pendulum":
+                pos_dims, vel_dims = [0], [1]
+            else:  # spring_mass
+                pos_dims, vel_dims = [0], [1]
+
+            structured_cfg = StructuredEnergyConfig(
+                env_name=env["name"],
+                state_dim=env["state_dim"],
+                pos_dims=pos_dims,
+                vel_dims=vel_dims,
+                device=str(device),
+            )
+            structured_model, _ = train_structured_energy(trajs, energy0_np=E[:, 0], cfg=structured_cfg)
+            structured_val = validate_conservation_model(
+                structured_model,
+                trajs,
+                env["energy"],
+                env["name"],
+                model_name="StructuredEnergy",
+                save_dir="figures",
+                device=device,
+            )
+            all_results[f"structured_energy_{env['name']}"] = structured_val
+
         # Phase 3: Polynomial model on RAW data (with energy alignment to pin scale)
         print("Training polynomial model (RAW)...")
         energy0 = E[:, 0].astype(np.float32, copy=False)
@@ -190,6 +221,27 @@ def main(args):
         # Phase 4: Probing (Polynomial)
         probe = probe_all_dimensions(poly_model, trajs, env["var_names"], device=str(device))
         all_results[f"probe_{env['name']}"] = probe
+
+        # Phase 4b: SINDy (STLSQ) sparse regression baseline (optional)
+        if args.run_sindy:
+            flat = trajs.reshape(-1, env["state_dim"]).astype(np.float64)
+            rng = np.random.RandomState(0)
+            n = min(int(args.sindy_samples), flat.shape[0])
+            X = flat[rng.choice(flat.shape[0], size=n, replace=False)]
+
+            def energy_on_states(X2d: np.ndarray) -> np.ndarray:
+                return env["energy"](X2d.reshape(1, 1, -1)).reshape(-1)
+
+            w_s, names_s = sindy_fit_energy(
+                X,
+                energy_fn=energy_on_states,
+                env_name=env["name"],
+                cfg=STLSQConfig(threshold=float(args.sindy_threshold), max_iter=15, normalize_columns=True),
+            )
+            sindy_eq = format_sparse_equation(names_s, w_s, threshold=0.01)
+            print("\nSINDy (STLSQ) equation:")
+            print(" ", sindy_eq)
+            all_results[f"sindy_{env['name']}"] = {"equation": sindy_eq, "weights": w_s.tolist(), "names": names_s}
 
         # Phase 5: PySR (optional)
         if not args.skip_pysr:
@@ -240,6 +292,8 @@ if __name__ == "__main__":
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--regenerate", action="store_true")
     parser.add_argument("--skip_pysr", action="store_true")
+    parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
 
     parser.add_argument("--cdn_epochs", type=int, default=200)
     parser.add_argument("--poly_epochs", type=int, default=2000)
@@ -250,5 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--pysr_iterations", type=int, default=500)
     parser.add_argument("--pysr_samples", type=int, default=50000)
     parser.add_argument("--pysr_maxsize", type=int, default=20)
+    parser.add_argument("--sindy_samples", type=int, default=50000)
+    parser.add_argument("--sindy_threshold", type=float, default=0.05)
     main(parser.parse_args())
 

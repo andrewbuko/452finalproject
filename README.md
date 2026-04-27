@@ -13,9 +13,9 @@ The entire experiment runs with one command:
 ## Project layout
 
 - **Data**: `data/projectile/`, `data/pendulum/`, `data/spring_mass/`
-- **Models**: `src/models/cdn.py`, `src/models/polynomial_cdn.py`
-- **Training**: `src/training/train_cdn.py`, `src/training/train_polynomial.py`
-- **Evaluation**: `src/evaluation/validate_cdn.py`, `src/evaluation/probe_cdn.py`, `src/evaluation/symbolic_regression.py`, `src/evaluation/hero_figure.py`
+- **Models**: `src/models/cdn.py` (black-box), `src/models/polynomial_cdn.py` (interpretable), `src/models/structured_energy.py` (T+V baseline)
+- **Training**: `src/training/train_cdn.py`, `src/training/train_polynomial.py`, `src/training/train_structured_energy.py`
+- **Evaluation**: `src/evaluation/validate_cdn.py`, `src/evaluation/probe_cdn.py`, `src/evaluation/sindy.py`, `src/evaluation/symbolic_regression.py`, `src/evaluation/hero_figure.py`
 - **Runner**: `scripts/run_all.py`
 - **Notebook**: `notebooks/full_run.ipynb` (end-to-end demo; loads existing data by default)
 
@@ -30,53 +30,30 @@ pip install -r requirements.txt
 Notes:
 - **PySR requires Julia**. If you only want the neural + polynomial discovery, pass `--skip_pysr`.
 
-## Generate or load data
+## Run the full pipeline
 
-Generate datasets + sanity plots:
-
-```powershell
-python -m src.data_generation.projectile
-python -m src.data_generation.pendulum
-python -m src.data_generation.spring_mass
-```
-
-Outputs:
-- `data/projectile/trajectories.npy`
-- `data/pendulum/trajectories.npy`
-- `figures/data_sanity_projectile.png`
-- `figures/data_sanity_pendulum.png`
-
-## Train baseline CDN
+Local (fast, CPU):
 
 ```powershell
-python -m scripts.run_cdn
+python scripts/run_all.py --device cpu --n_trajectories 20000 --cdn_epochs 20 --poly_epochs 200 --poly_batch_size 256 --skip_pysr
 ```
 
-Outputs:
-- `models/cdn_projectile_best.pt`, `models/cdn_pendulum_best.pt`
-- `figures/cdn_validation_projectile.png`, `figures/cdn_validation_pendulum.png`
+Cluster (GPU):
 
-## Equation discovery (readable coefficients + PySR)
-
-This is the main “equation read-out” pipeline:
-
-```powershell
-python -m scripts.run_equation_discovery
+```bash
+python -u scripts/run_all.py --device cuda --data_dir data --save_dir results
 ```
 
-Outputs (examples):
-- `models/poly_cdn_projectile_best.pt`, `models/poly_cdn_pendulum_best.pt`
-- `figures/pysr_pareto_projectile_energy.png`, `figures/pysr_pareto_pendulum_energy.png`
-- `figures/pysr_pareto_projectile_cdn.png`, `figures/pysr_pareto_pendulum_cdn.png`
-- `figures/equation_validation_projectile.png`, `figures/equation_validation_pendulum.png`
+Optional alternatives (enabled by default; disable if desired):
 
-If PySR/Julia is finicky on your machine or cluster, run the PySR-only script (no torch import):
+- `--no-run_structured_energy`
+- `--no-run_sindy`
 
-```powershell
-python -m scripts.run_pysr_energy_only
-```
+## Outputs
 
-## Probing (1D sweeps)
+- **Results**: `results/experiment_results.json`, `results/experiment_log.txt`
+- **Hero figure**: `figures/hero_equation_comparison.png`
+- **Checkpoints**: `models/`
 
 This probes the learned invariant by sweeping one input dimension at a time.
 

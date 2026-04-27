@@ -119,6 +119,16 @@ def build_library_pendulum(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
     return Theta, names
 
 
+def build_library_spring_mass(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
+    """
+    X: (N,2) [x,v]
+    """
+    x, v = X[:, 0], X[:, 1]
+    Theta = np.column_stack([np.ones_like(x), x, v, x * x, x * v, v * v])
+    names = ["1", "x", "v", "x^2", "x*v", "v^2"]
+    return Theta, names
+
+
 def format_sparse_equation(names: List[str], w: np.ndarray, threshold: float = 0.01) -> str:
     terms: List[str] = []
     for name, c in zip(names, w.tolist()):
@@ -149,6 +159,9 @@ def sindy_fit_energy(
         y = energy_fn(X)
     elif env_name == "pendulum":
         Theta, names = build_library_pendulum(X)
+        y = energy_fn(X)
+    elif env_name in ("spring_mass", "spring"):
+        Theta, names = build_library_spring_mass(X)
         y = energy_fn(X)
     else:
         raise ValueError(env_name)

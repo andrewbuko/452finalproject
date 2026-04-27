@@ -16,3 +16,5 @@ models/**/*.pt
 models/**/*.npz
 models/**/*_history.npy
 figures/*.png
+figures/*.json
+results_smoke/

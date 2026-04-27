@@ -41,9 +41,11 @@ def main(args):
     from src.evaluation.probe_cdn import probe_all_dimensions
     from src.evaluation.symbolic_regression import run_symbolic_regression
     from src.evaluation.validate_cdn import validate_conservation_model
+    from src.evaluation.validate_diffusion import evaluate_diffusion_rollout
     from src.evaluation.sindy import STLSQConfig, format_sparse_equation, sindy_fit_energy
     from src.models.cdn import ConservationDiscoveryNetwork
     from src.training.train_cdn import train_conservation_model
+    from src.training.train_diffusion import DiffusionTrainConfig, train_diffusion_transition
     from src.training.train_polynomial import train_polynomial_model
     from src.training.train_structured_energy import StructuredEnergyConfig, train_structured_energy
 
@@ -55,8 +57,9 @@ def main(args):
             "default_n": 1_000_000,
             "poly_degree": 2,
             "trig_dims": None,
+            # PySR discovers equations from operators (not a fixed polynomial library)
             "pysr_unary": ["square"],
-            "pysr_binary": ["+", "-", "*"],
+            "pysr_binary": ["+", "-", "*", "/"],
             "generate": generate_projectile_data,
             "energy": compute_energy_projectile,
             "known": "E = 0.5*vx^2 + 0.5*vy^2 + 9.81*y",
@@ -68,8 +71,8 @@ def main(args):
             "default_n": 500_000,
             "poly_degree": 2,
             "trig_dims": [0],
-            "pysr_unary": ["square", "cos"],
-            "pysr_binary": ["+", "-", "*"],
+            "pysr_unary": ["square", "sin", "cos"],
+            "pysr_binary": ["+", "-", "*", "/"],
             "generate": generate_pendulum_data,
             "energy": compute_energy_pendulum,
             "known": "H = 0.5*omega^2 - 9.81*cos(theta)",
@@ -82,7 +85,7 @@ def main(args):
             "poly_degree": 2,
             "trig_dims": None,
             "pysr_unary": ["square"],
-            "pysr_binary": ["+", "-", "*"],
+            "pysr_binary": ["+", "-", "*", "/"],
             "generate": generate_spring_mass_data,
             "energy": compute_energy_spring,
             "known": "E = 5.0*x^2 + 0.5*v^2",
@@ -155,6 +158,37 @@ def main(args):
             device=device,
         )
         all_results[f"cdn_{env['name']}"] = cdn_val
+
+        # Phase 2c: Diffusion transition baseline (RAW trajectories -> rollout)
+        if args.run_diffusion:
+            print("Training diffusion transition model (RAW -> rollout)...")
+            trajs_train_raw, trajs_val_raw = train_val_split(trajs, val_fraction=0.1, seed=42)
+            diff_cfg = DiffusionTrainConfig(
+                env_name=env["name"],
+                state_dim=env["state_dim"],
+                K=args.diffusion_steps,
+                hidden_dim=args.diffusion_hidden_dim,
+                time_emb_dim=args.diffusion_time_emb_dim,
+                lr=args.diffusion_lr,
+                epochs=args.diffusion_epochs,
+                batch_size=args.diffusion_batch_size,
+                max_train_trajectories=args.diffusion_max_train_trajectories,
+                device=str(device),
+                save_dir="models",
+                log_every=max(1, args.diffusion_epochs // 10),
+            )
+            diff_model, diff_stats, _ = train_diffusion_transition(trajs_train_raw, cfg=diff_cfg)
+            diff_metrics = evaluate_diffusion_rollout(
+                model=diff_model,
+                trajs_raw=trajs_val_raw,
+                energy_fn_np=env["energy"],
+                env_name=env["name"],
+                stats=diff_stats,
+                n_rollouts=args.diffusion_eval_rollouts,
+                device=str(device),
+                save_dir="figures",
+            )
+            all_results[f"diffusion_{env['name']}"] = diff_metrics
 
         # Phase 2b: Structured Energy Network baseline (optional)
         if args.run_structured_energy:
@@ -294,6 +328,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip_pysr", action="store_true")
     parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--run_diffusion", action=argparse.BooleanOptionalAction, default=True)
 
     parser.add_argument("--cdn_epochs", type=int, default=200)
     parser.add_argument("--poly_epochs", type=int, default=2000)
@@ -306,5 +341,15 @@ if __name__ == "__main__":
     parser.add_argument("--pysr_maxsize", type=int, default=20)
     parser.add_argument("--sindy_samples", type=int, default=50000)
     parser.add_argument("--sindy_threshold", type=float, default=0.05)
+
+    # Diffusion transition baseline (trajectory rollouts)
+    parser.add_argument("--diffusion_epochs", type=int, default=25)
+    parser.add_argument("--diffusion_lr", type=float, default=2e-4)
+    parser.add_argument("--diffusion_batch_size", type=int, default=4096)
+    parser.add_argument("--diffusion_steps", type=int, default=50)
+    parser.add_argument("--diffusion_hidden_dim", type=int, default=256)
+    parser.add_argument("--diffusion_time_emb_dim", type=int, default=64)
+    parser.add_argument("--diffusion_max_train_trajectories", type=int, default=200000)
+    parser.add_argument("--diffusion_eval_rollouts", type=int, default=256)
     main(parser.parse_args())
 

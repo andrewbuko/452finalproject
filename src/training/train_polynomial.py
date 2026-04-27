@@ -21,6 +21,7 @@ def train_polynomial_model(
     state_dim,
     env_name,
     var_names,
+    energy0_np=None,
     save_dir="models",
     degree=2,
     include_trig_dims=None,
@@ -28,6 +29,7 @@ def train_polynomial_model(
     epochs=2000,
     batch_size=4096,
     lambda_var=1.0,
+    lambda_energy=0.1,
     epsilon=None,
     device=None,
     warmup_epochs=200,
@@ -57,7 +59,14 @@ def train_polynomial_model(
     train_data = raw_trajectories_np[:max_train].astype(np.float32, copy=False)
 
     trajs_tensor = torch.tensor(train_data, dtype=torch.float32, device=device)
-    loader = DataLoader(TensorDataset(trajs_tensor), batch_size=batch_size, shuffle=True, drop_last=True)
+    if energy0_np is not None:
+        e0 = np.asarray(energy0_np[:max_train], dtype=np.float32)
+        e0_tensor = torch.tensor(e0, dtype=torch.float32, device=device)
+        loader = DataLoader(TensorDataset(trajs_tensor, e0_tensor), batch_size=batch_size, shuffle=True, drop_last=True)
+        e0_scale = float(np.std(e0) + 1e-8)
+    else:
+        loader = DataLoader(TensorDataset(trajs_tensor), batch_size=batch_size, shuffle=True, drop_last=True)
+        e0_scale = 1.0
 
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=500, T_mult=2)
@@ -73,9 +82,20 @@ def train_polynomial_model(
             for pg in opt.param_groups:
                 pg["lr"] = warm_lr
 
-        for (batch,) in loader:
+        for batch in loader:
+            batch_traj = batch[0]
+            batch_e0 = batch[1] if len(batch) > 1 else None
             opt.zero_grad(set_to_none=True)
-            loss, _, _ = conservation_loss(model, batch, lambda_var=lambda_var, epsilon=epsilon)
+            loss, _, _ = conservation_loss(model, batch_traj, lambda_var=lambda_var, epsilon=epsilon)
+
+            # Energy alignment term pins the scale/offset so coefficients are in physical units.
+            # Without this, any affine transform of a conserved quantity is also conserved.
+            if (batch_e0 is not None) and (lambda_energy is not None) and (lambda_energy > 0):
+                B, T, D = batch_traj.shape
+                f0 = model(batch_traj[:, 0, :].reshape(B, D))
+                align = torch.mean((f0 - batch_e0) ** 2) / (e0_scale**2)
+                loss = loss + float(lambda_energy) * align
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             opt.step()

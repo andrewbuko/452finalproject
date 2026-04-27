@@ -154,13 +154,15 @@ def main(args):
         )
         all_results[f"cdn_{env['name']}"] = cdn_val
 
-        # Phase 3: Polynomial model on RAW data
+        # Phase 3: Polynomial model on RAW data (with energy alignment to pin scale)
         print("Training polynomial model (RAW)...")
+        energy0 = E[:, 0].astype(np.float32, copy=False)
         poly_model, poly_eq = train_polynomial_model(
             trajs,
             state_dim=env["state_dim"],
             env_name=env["name"],
             var_names=env["var_names"],
+            energy0_np=energy0,
             save_dir="models",
             degree=env["poly_degree"],
             include_trig_dims=env["trig_dims"],

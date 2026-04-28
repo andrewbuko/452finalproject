@@ -145,7 +145,7 @@ def main(args):
         train_idx = perm[:split]
         trajs_train = trajs_norm[train_idx]
         energy0_train = E[train_idx, 0]
-        shared_epochs = int(args.epochs_all) if args.epochs_all is not None else None
+        shared_epochs = int(args.epochs_rest) if args.epochs_rest is not None else None
 
         # CDN with alignment + scale constraints so f(s) correlates with analytical energy.
         cdn_cfg = CDNTrainConfig(
@@ -154,7 +154,7 @@ def main(args):
             hidden_dim=256,
             n_layers=4,
             lr=1e-3,
-            epochs=int(shared_epochs or args.cdn_epochs),
+            epochs=int(args.cdn_epochs),
             batch_size=512,
             lambda_var=float(args.cdn_lambda_var),
             epsilon=float(args.cdn_epsilon),
@@ -396,13 +396,13 @@ if __name__ == "__main__":
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_diffusion", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
-        "--epochs_all",
+        "--epochs_rest",
         type=int,
         default=512,
-        help="If set, use this epoch count for all models.",
+        help="Epochs for non-CDN models (structured/polynomial/diffusion).",
     )
 
-    parser.add_argument("--cdn_epochs", type=int, default=512)
+    parser.add_argument("--cdn_epochs", type=int, default=100)
     parser.add_argument("--cdn_lambda_var", type=float, default=0.5)
     parser.add_argument("--cdn_epsilon", type=float, default=10.0)
     parser.add_argument("--cdn_lambda_align", type=float, default=0.2)

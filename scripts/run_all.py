@@ -120,6 +120,11 @@ def main(args):
         else:
             trajs = np.load(traj_path)
             print(f"Loaded {env['name']} data: {trajs.shape}")
+            # Respect --n_trajectories even when loading an existing dataset.
+            # (The on-disk dataset may contain many more trajectories.)
+            if trajs.shape[0] > n_traj:
+                trajs = trajs[:n_traj]
+                print(f"Subsampled {env['name']} to: {trajs.shape}")
 
         # Sanity check: energy conservation of generated data
         E = env["energy"](trajs)

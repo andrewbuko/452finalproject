@@ -125,7 +125,12 @@ def main(args):
                 trajs = trajs[:n_traj]
                 print(f"Subsampled {env['name']} to: {trajs.shape}")
 
-        # Sanity check: energy conservation of generated data
+        # Optional noise ablation: add IID Gaussian noise to states.
+        if args.noise_std and float(args.noise_std) > 0:
+            rngn = np.random.RandomState(123)
+            trajs = trajs + rngn.normal(scale=float(args.noise_std), size=trajs.shape).astype(trajs.dtype, copy=False)
+
+        # Sanity check: energy conservation of (possibly noisy) data
         E = env["energy"](trajs)
         print(f"{env['name']} energy conservation: std={E.std(axis=1).mean():.2e}")
 
@@ -385,6 +390,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_timesteps", type=int, default=200)
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--regenerate", action="store_true")
+    parser.add_argument("--noise_std", type=float, default=0.0, help="Add Gaussian noise to trajectories (ablation).")
     parser.add_argument("--skip_pysr", action="store_true")
     parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)

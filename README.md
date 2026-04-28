@@ -1,25 +1,53 @@
-## From Trajectories to Equations: Machine Discovery of Conservation Laws via Neural Networks and Symbolic Regression
+## From trajectories to equations
 
-Given only raw position and velocity measurements of moving objects - with no physics knowledge, no labels, and no equations - this project discovers conserved quantities and recovers readable physics equations:
+This repo is a CPSC 452 final project on **discovering conservation laws** from raw trajectories and recovering **interpretable equations**.
 
-- **PROJECTILE**: `f(s) = 0.50000*vx^2 + 0.50000*vy^2 + 9.81000*y`
-- **PENDULUM**: `f(s) = 0.50000*omega^2 - 9.81000*cos(theta)`
-- **SPRING-MASS**: `f(s) = 5.00000*x^2 + 0.50000*v^2`
+Given only state measurements over time (positions/velocities or angle/angular-velocity), we learn a scalar invariant \(f(s)\) that is conserved along trajectories, and then optionally recover a symbolic expression for it.
 
-The entire experiment runs with one command:
+### Environments (synthetic ground-truth physics)
+- **Projectile** (`state=[x,y,vx,vy]`): \(E = 0.5(v_x^2+v_y^2) + g y\)
+- **Pendulum** (`state=[theta,omega]`): \(H = 0.5\omega^2 - g\cos(\theta)\) (with \(m=l=1\))
+- **Spring-mass** (`state=[x,v]`): \(E = 0.5k x^2 + 0.5 v^2\) (with \(k=10\))
 
-- `python scripts/run_all.py --device cuda --data_dir data --save_dir results`
+The generators live in:
+- `src/data_generation/projectile.py`
+- `src/data_generation/pendulum.py`
+- `src/data_generation/spring_mass.py`
 
-## Project layout
+## What methods are implemented?
 
-- **Data**: `data/projectile/`, `data/pendulum/`, `data/spring_mass/`
-- **Models**: `src/models/cdn.py` (black-box), `src/models/polynomial_cdn.py` (interpretable), `src/models/structured_energy.py` (T+V baseline)
-- **Training**: `src/training/train_cdn.py`, `src/training/train_polynomial.py`, `src/training/train_structured_energy.py`
-- **Evaluation**: `src/evaluation/validate_cdn.py`, `src/evaluation/probe_cdn.py`, `src/evaluation/sindy.py`, `src/evaluation/symbolic_regression.py`, `src/evaluation/hero_figure.py`
-- **Runner**: `scripts/run_all.py`
-- **Notebook**: `notebooks/full_run.ipynb` (end-to-end demo; loads existing data by default)
+There are two “entrypoints” depending on what you want to show:
 
-## Setup (Windows / PowerShell)
+- **Notebook entrypoint**: `notebooks/full_run.ipynb`  
+  This is the “four-model comparison” notebook (linear, symbolic, diffusion, structured \(K+V\)).
+
+- **Script entrypoint**: `scripts/run_all.py`  
+  This runs the full experiment pipeline (includes CDN + optional baselines and plots).
+
+### Models (core baselines)
+- **CDN (black-box invariant learner)**: `src/models/cdn.py`  
+  An MLP \(s_t \mapsto f_\theta(s_t)\) trained with a temporal conservation loss.
+
+- **Linear polynomial invariant (interpretable)**: `src/models/polynomial_cdn.py`  
+  A *linear model over a fixed feature library* (polynomial + optional trig), trained with the same conservation loss + energy alignment to pin scale.
+
+- **Structured energy network (physics prior)**: `src/models/structured_energy.py`  
+  Enforces an inductive bias \(H(q,v)=T(v)+V(q)\) using two subnetworks.
+
+- **Diffusion transition model (trajectory baseline)**: `src/models/diffusion_transition.py`  
+  A conditional DDPM over one-step deltas \(\Delta s = s_{t+1}-s_t\), rolled out autoregressively.
+
+### Symbolic regression (equation discovery)
+- **PySR / SymbolicRegression.jl**: `src/evaluation/symbolic_regression.py`  
+  This searches for an equation form given operators (not a fixed polynomial basis).
+  **PySR requires Julia**; you can disable it with `--skip_pysr`.
+
+- **SINDy-style sparse regression (hand-designed library)**: `src/evaluation/sindy.py`  
+  STLSQ sparse regression over a chosen library (this *is* “hand feeding” a candidate library).
+
+## Installation
+
+### Windows (PowerShell)
 
 ```powershell
 python -m venv venv
@@ -27,100 +55,125 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-Notes:
-- **PySR requires Julia**. If you only want the neural + polynomial discovery, pass `--skip_pysr`.
-
-## Run the full pipeline
-
-Local (fast, CPU):
-
-```powershell
-python scripts/run_all.py --device cpu --n_trajectories 20000 --cdn_epochs 20 --poly_epochs 200 --poly_batch_size 256 --skip_pysr
-```
-
-Cluster (GPU):
+### Linux/macOS
 
 ```bash
-python -u scripts/run_all.py --device cuda --data_dir data --save_dir results
-```
-
-Optional alternatives (enabled by default; disable if desired):
-
-- `--no-run_structured_energy`
-- `--no-run_sindy`
-
-## Outputs
-
-- **Results**: `results/experiment_results.json`, `results/experiment_log.txt`
-- **Hero figure**: `figures/hero_equation_comparison.png`
-- **Checkpoints**: `models/`
-
-This probes the learned invariant by sweeping one input dimension at a time.
-
-```powershell
-python -m scripts.run_probing
-```
-
-Outputs:
-- `figures/probe_projectile.png`, `figures/probe_pendulum.png`
-
-## End-to-end
-
-Runs the whole pipeline with skip-if-exists logic:
-
-```powershell
-python -m scripts.run_all
-```
-
-## Running on a server/cluster (git push here → pull there)
-
-- **On your laptop (this repo)**:
-
-```powershell
-git status
-git add .
-git commit -m "update equation discovery pipeline"
-git push
-```
-
-- **On the cluster login node**:
-
-```bash
-git clone <your-repo-url>
-cd 452finalproject
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-- **Run jobs**:
-  - **CPU equation discovery** (fast, no Julia required):
+### PySR / Julia (optional)
+
+PySR needs a working Julia installation. If you don’t have Julia set up, you can still run everything else and pass `--skip_pysr` in scripts (or the notebook will simply skip symbolic regression).
+
+## Quickstart
+
+### Run the notebook (four-model comparison)
+
+Open and run:
+- `notebooks/full_run.ipynb`
+
+Outputs:
+- `results/four_model_results.json`
+- model checkpoints in `models/`
+- figures in `figures/`
+
+### Run the full script pipeline
+
+GPU (recommended):
 
 ```bash
-python -m scripts.run_equation_discovery
+python -u scripts/run_all.py --device cuda --data_dir data --save_dir results
 ```
 
-  - **PySR (Julia)**:
-    - Make sure Julia is available (module/juliaup). Then run:
+CPU (smaller dev run):
 
 ```bash
-python -m scripts.run_pysr_energy_only
+python -u scripts/run_all.py --device cpu --n_trajectories 20000 --n_timesteps 100 --cdn_epochs 50 --poly_epochs 400 --skip_pysr
 ```
 
-- **SLURM example** (`run_job.sh`):
+## Running on a cluster (SLURM)
+
+The SLURM submission script is:
+- `cluster/submit_job.sh`
+
+Submit:
 
 ```bash
-#!/bin/bash
-#SBATCH -J eqdisc
-#SBATCH -c 8
-#SBATCH --mem=16G
-#SBATCH -t 02:00:00
-
-set -euo pipefail
-cd /path/to/452finalproject
-source venv/bin/activate
-python -m scripts.run_equation_discovery
+sbatch cluster/submit_job.sh
 ```
+
+Watch logs:
+
+```bash
+squeue -u $USER
+tail -f results/slurm_<JOBID>.log
+tail -n 50 results/slurm_<JOBID>.err
+```
+
+### Avoid timeouts (diffusion is the expensive part)
+
+Diffusion training cost scales roughly with:
+
+\[
+\text{transitions} \approx \min(N,\ \text{diffusion\_max\_train\_trajectories}) \cdot (T-1)
+\]
+
+For a “finish under the time limit” cluster run, add flags like:
+
+```bash
+--skip_pysr \
+--n_trajectories 20000 \
+--n_timesteps 100 \
+--diffusion_max_train_trajectories 20000 \
+--diffusion_epochs 8 \
+--diffusion_eval_rollouts 64
+```
+
+Important: when `trajectories.npy` already exists, `scripts/run_all.py` will **load and then subsample** to `--n_trajectories` (so you don’t accidentally train on the full on-disk dataset).
+
+## Outputs
+
+### Files and directories
+- **Results JSON**: `results/experiment_results.json`
+- **Run log**: `results/experiment_log.txt` (plus SLURM `results/slurm_%j.log`)
+- **Figures**: `figures/`  
+  Includes conservation validation plots and a “hero” comparison figure.
+- **Model checkpoints**: `models/`  
+  `.pt` and `.npz` files are written here; see `.gitignore` for what’s tracked.
+
+### Common figure outputs
+- `figures/cdn_validation_<env>.png`
+- `figures/hero_equation_comparison.png`
+
+## Repository layout (where to look)
+
+- **Data generation**: `src/data_generation/`
+  - `projectile.py`, `pendulum.py`, `spring_mass.py`
+  - `utils.py` (scaling + train/val split)
+- **Models**: `src/models/`
+  - `cdn.py`, `polynomial_cdn.py`, `structured_energy.py`, `diffusion_transition.py`
+- **Training**: `src/training/`
+  - `train_cdn.py`, `train_polynomial.py`, `train_structured_energy.py`, `train_diffusion.py`
+- **Evaluation**: `src/evaluation/`
+  - `validate_cdn.py`, `validate_diffusion.py`, `probe_cdn.py`, `sindy.py`, `symbolic_regression.py`, `hero_figure.py`
+- **Main runner**: `scripts/run_all.py`
+- **Cluster**: `cluster/submit_job.sh`, `cluster/environment.yml`
+
+## Troubleshooting
+
+### “My SLURM job produced no log file”
+If the job is still pending (`ST=PD`), SLURM won’t create `results/slurm_<JOBID>.log` yet. Wait until the job is running (`ST=R`).
+
+### “My job timed out in diffusion”
+Lower diffusion workload:
+- `--diffusion_max_train_trajectories` (best lever)
+- `--diffusion_epochs`
+- `--n_timesteps`
+
+### “PySR isn’t working”
+Install Julia and ensure `pysr` imports. Otherwise use `--skip_pysr`.
 
 ## References
 

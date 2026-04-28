@@ -151,14 +151,14 @@ def main(args):
             lr=1e-3,
             epochs=int(shared_epochs or args.cdn_epochs),
             batch_size=512,
-            lambda_var=0.5,
-            epsilon=10.0,
+            lambda_var=float(args.cdn_lambda_var),
+            epsilon=float(args.cdn_epsilon),
             var_reg="hinge",
-            lambda_scale=0.05,
-            target_mean=0.0,
-            std_min=0.8,
-            std_max=1.2,
-            lambda_align=0.2,
+            lambda_scale=float(args.cdn_lambda_scale),
+            target_mean=float(args.cdn_target_mean),
+            std_min=float(args.cdn_std_min),
+            std_max=float(args.cdn_std_max),
+            lambda_align=float(args.cdn_lambda_align),
             grad_clip=1.0,
             log_every=50,
             save_dir="models",
@@ -199,6 +199,8 @@ def main(args):
                 vel_dims=vel_dims,
                 device=str(device),
                 epochs=int(shared_epochs or args.structured_epochs),
+                lambda_var=float(args.structured_lambda_var),
+                lambda_energy=float(args.structured_lambda_energy),
             )
             structured_model, _ = train_structured_energy(trajs, energy0_np=E[:, 0], cfg=structured_cfg)
             structured_val = validate_conservation_model(
@@ -231,6 +233,8 @@ def main(args):
             batch_size=args.poly_batch_size,
             device=device,
             warmup_epochs=args.poly_warmup_epochs,
+            lambda_var=float(args.poly_lambda_var),
+            lambda_energy=float(args.poly_lambda_energy),
         )
         discovered_eqs.append(poly_eq)
         known_eqs.append(env["known"])
@@ -393,11 +397,22 @@ if __name__ == "__main__":
     )
 
     parser.add_argument("--cdn_epochs", type=int, default=512)
+    parser.add_argument("--cdn_lambda_var", type=float, default=0.5)
+    parser.add_argument("--cdn_epsilon", type=float, default=10.0)
+    parser.add_argument("--cdn_lambda_align", type=float, default=0.2)
+    parser.add_argument("--cdn_lambda_scale", type=float, default=0.05)
+    parser.add_argument("--cdn_target_mean", type=float, default=0.0)
+    parser.add_argument("--cdn_std_min", type=float, default=0.8)
+    parser.add_argument("--cdn_std_max", type=float, default=1.2)
     parser.add_argument("--structured_epochs", type=int, default=512)
+    parser.add_argument("--structured_lambda_var", type=float, default=1.0)
+    parser.add_argument("--structured_lambda_energy", type=float, default=0.1)
     parser.add_argument("--poly_epochs", type=int, default=512)
     parser.add_argument("--poly_lr", type=float, default=0.005)
     parser.add_argument("--poly_batch_size", type=int, default=4096)
     parser.add_argument("--poly_warmup_epochs", type=int, default=200)
+    parser.add_argument("--poly_lambda_var", type=float, default=1.0)
+    parser.add_argument("--poly_lambda_energy", type=float, default=0.1)
 
     parser.add_argument("--pysr_iterations", type=int, default=500)
     parser.add_argument("--pysr_samples", type=int, default=50000)

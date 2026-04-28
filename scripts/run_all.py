@@ -385,11 +385,16 @@ if __name__ == "__main__":
     parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_diffusion", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--epochs_all", type=int, default=None, help="If set, use this epoch count for all models.")
+    parser.add_argument(
+        "--epochs_all",
+        type=int,
+        default=512,
+        help="If set, use this epoch count for all models.",
+    )
 
-    parser.add_argument("--cdn_epochs", type=int, default=200)
-    parser.add_argument("--structured_epochs", type=int, default=300)
-    parser.add_argument("--poly_epochs", type=int, default=2000)
+    parser.add_argument("--cdn_epochs", type=int, default=512)
+    parser.add_argument("--structured_epochs", type=int, default=512)
+    parser.add_argument("--poly_epochs", type=int, default=512)
     parser.add_argument("--poly_lr", type=float, default=0.005)
     parser.add_argument("--poly_batch_size", type=int, default=4096)
     parser.add_argument("--poly_warmup_epochs", type=int, default=200)
@@ -401,7 +406,7 @@ if __name__ == "__main__":
     parser.add_argument("--sindy_threshold", type=float, default=0.05)
 
     # Diffusion transition baseline (trajectory rollouts)
-    parser.add_argument("--diffusion_epochs", type=int, default=25)
+    parser.add_argument("--diffusion_epochs", type=int, default=512)
     parser.add_argument("--diffusion_lr", type=float, default=2e-4)
     parser.add_argument("--diffusion_batch_size", type=int, default=4096)
     parser.add_argument("--diffusion_steps", type=int, default=50)

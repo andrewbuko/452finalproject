@@ -54,12 +54,13 @@ class TransitionEpsModel(nn.Module):
     Predict diffusion noise eps for a delta-state vector, conditioned on current state s_t and time index t.
     """
 
-    def __init__(self, state_dim: int, hidden_dim: int = 256, time_emb_dim: int = 64):
+    def __init__(self, state_dim: int, hidden_dim: int = 256, time_emb_dim: int = 64, cond_dim: int = 0):
         super().__init__()
         self.state_dim = int(state_dim)
         self.time_emb_dim = int(time_emb_dim)
+        self.cond_dim = int(cond_dim)
 
-        in_dim = state_dim + state_dim + time_emb_dim  # s_t, x_k (noised delta), emb(k)
+        in_dim = state_dim + state_dim + time_emb_dim + self.cond_dim  # s_t, x_k (noised delta), emb(k), cond
         self.net = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
             nn.SiLU(),
@@ -70,7 +71,7 @@ class TransitionEpsModel(nn.Module):
             nn.Linear(hidden_dim, state_dim),
         )
 
-    def forward(self, s_t: torch.Tensor, x_k: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
+    def forward(self, s_t: torch.Tensor, x_k: torch.Tensor, k: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
           s_t: (B, D) current state
@@ -80,7 +81,14 @@ class TransitionEpsModel(nn.Module):
           eps_hat: (B, D)
         """
         emb = _sinusoidal_embedding(k, self.time_emb_dim)
-        h = torch.cat([s_t, x_k, emb], dim=1)
+        if self.cond_dim:
+            if cond is None:
+                raise ValueError("cond is required when cond_dim > 0")
+            if cond.ndim == 1:
+                cond = cond.unsqueeze(1)
+            h = torch.cat([s_t, x_k, emb, cond], dim=1)
+        else:
+            h = torch.cat([s_t, x_k, emb], dim=1)
         return self.net(h)
 
 
@@ -90,11 +98,14 @@ class DiffusionTransitionModel(nn.Module):
     Trained with eps-prediction objective.
     """
 
-    def __init__(self, state_dim: int, K: int = 50, hidden_dim: int = 256, time_emb_dim: int = 64):
+    def __init__(self, state_dim: int, K: int = 50, hidden_dim: int = 256, time_emb_dim: int = 64, cond_dim: int = 0):
         super().__init__()
         self.state_dim = int(state_dim)
         self.K = int(K)
-        self.eps_model = TransitionEpsModel(state_dim=state_dim, hidden_dim=hidden_dim, time_emb_dim=time_emb_dim)
+        self.cond_dim = int(cond_dim)
+        self.eps_model = TransitionEpsModel(
+            state_dim=state_dim, hidden_dim=hidden_dim, time_emb_dim=time_emb_dim, cond_dim=self.cond_dim
+        )
         self.register_buffer("_betas", torch.empty(self.K))
         self.register_buffer("_alphas", torch.empty(self.K))
         self.register_buffer("_alphas_cumprod", torch.empty(self.K))
@@ -127,7 +138,7 @@ class DiffusionTransitionModel(nn.Module):
         s2 = self._sqrt_one_minus_alphas_cumprod[k].unsqueeze(1)
         return s1 * x0 + s2 * eps
 
-    def training_loss(self, s_t: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
+    def training_loss(self, s_t: torch.Tensor, delta: torch.Tensor, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
           s_t: (B, D)
@@ -138,11 +149,11 @@ class DiffusionTransitionModel(nn.Module):
         k = torch.randint(0, self.K, (B,), device=device)
         eps = torch.randn(B, D, device=device)
         x_k = self.q_sample(delta, k, eps)
-        eps_hat = self.eps_model(s_t, x_k, k)
+        eps_hat = self.eps_model(s_t, x_k, k, cond=cond)
         return torch.mean((eps_hat - eps) ** 2)
 
     @torch.no_grad()
-    def sample_delta(self, s_t: torch.Tensor, n_steps: Optional[int] = None) -> torch.Tensor:
+    def sample_delta(self, s_t: torch.Tensor, n_steps: Optional[int] = None, cond: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Reverse diffusion to sample delta ~ p(delta | s_t).
         Uses a simple DDPM sampler (no classifier-free guidance).
@@ -161,7 +172,7 @@ class DiffusionTransitionModel(nn.Module):
             alpha = self._alphas[kk].unsqueeze(1)
             a_bar = self._alphas_cumprod[kk].unsqueeze(1)
 
-            eps_hat = self.eps_model(s_t, x, kk)
+            eps_hat = self.eps_model(s_t, x, kk, cond=cond)
             # Predict x0 (delta) from eps_hat
             x0_hat = (x - torch.sqrt(1.0 - a_bar) * eps_hat) / torch.sqrt(a_bar + 1e-8)
             # DDPM mean
@@ -174,7 +185,13 @@ class DiffusionTransitionModel(nn.Module):
         return x
 
     @torch.no_grad()
-    def rollout(self, s0: torch.Tensor, T: int) -> torch.Tensor:
+    def rollout(
+        self,
+        s0: torch.Tensor,
+        T: int,
+        cond_fn: Optional[callable] = None,
+        project_fn: Optional[callable] = None,
+    ) -> torch.Tensor:
         """
         Roll out a trajectory by repeatedly sampling delta.
         Args:
@@ -188,8 +205,11 @@ class DiffusionTransitionModel(nn.Module):
         traj[:, 0, :] = s0
         s = s0
         for t in range(1, T):
-            delta = self.sample_delta(s)
+            cond = cond_fn(s, t) if cond_fn is not None else None
+            delta = self.sample_delta(s, cond=cond)
             s = s + delta
+            if project_fn is not None:
+                s = project_fn(s, t)
             traj[:, t, :] = s
         return traj
 

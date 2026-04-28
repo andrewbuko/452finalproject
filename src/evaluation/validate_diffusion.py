@@ -18,6 +18,9 @@ def evaluate_diffusion_rollout(
     n_rollouts: int = 256,
     device: Optional[str] = None,
     save_dir: str = "figures",
+    cond_fn_raw: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    energy_model=None,
+    project_steps: int = 1,
 ) -> Dict[str, float]:
     """
     Compare diffusion rollouts vs ground truth on a subset of trajectories.
@@ -36,7 +39,16 @@ def evaluate_diffusion_rollout(
     gt = trajs_raw[idx].astype(np.float32, copy=False)
 
     s0 = gt[:, 0, :]
-    gen = rollout_diffusion(model, s0_raw=s0, T=T, stats=stats, device=device)
+    gen = rollout_diffusion(
+        model,
+        s0_raw=s0,
+        T=T,
+        stats=stats,
+        device=device,
+        cond_fn_raw=cond_fn_raw,
+        energy_model=energy_model,
+        project_steps=int(project_steps),
+    )
 
     rollout_mse = float(np.mean((gen - gt) ** 2))
 

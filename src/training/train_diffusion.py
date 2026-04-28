@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -25,6 +25,8 @@ class DiffusionTrainConfig:
     device: Optional[str] = None
     save_dir: str = "models"
     log_every: int = 2
+    # If > 0, add extra conditioning dimension(s) to the diffusion model.
+    cond_dim: int = 0
 
 
 def _compute_standardize_stats(trajs: np.ndarray, eps: float = 1e-8) -> Dict[str, np.ndarray]:
@@ -59,6 +61,7 @@ def build_transition_dataset(trajs_z: np.ndarray) -> Tuple[np.ndarray, np.ndarra
 def train_diffusion_transition(
     trajectories_raw: np.ndarray,
     cfg: DiffusionTrainConfig,
+    cond_np: Optional[np.ndarray] = None,
 ) -> Tuple[DiffusionTransitionModel, Dict[str, np.ndarray], Dict[str, list]]:
     """
     Train a diffusion transition model on one-step deltas (standardized).
@@ -81,8 +84,21 @@ def train_diffusion_transition(
     stats = _compute_standardize_stats(train_subset)
     trajs_z = _standardize(train_subset, stats)
     s_t_np, delta_np = build_transition_dataset(trajs_z)
+    if cfg.cond_dim:
+        if cond_np is None:
+            raise ValueError("cond_np must be provided when cfg.cond_dim > 0")
+        cond_np = np.asarray(cond_np, dtype=np.float32)
+        if cond_np.ndim == 1:
+            cond_np = cond_np[:, None]
+        if cond_np.shape[0] != s_t_np.shape[0]:
+            raise ValueError(f"cond_np rows {cond_np.shape[0]} != s_t rows {s_t_np.shape[0]}")
+        if cond_np.shape[1] != int(cfg.cond_dim):
+            raise ValueError(f"cond_np dim {cond_np.shape[1]} != cfg.cond_dim {cfg.cond_dim}")
 
-    ds = TensorDataset(torch.from_numpy(s_t_np), torch.from_numpy(delta_np))
+    if cfg.cond_dim:
+        ds = TensorDataset(torch.from_numpy(s_t_np), torch.from_numpy(delta_np), torch.from_numpy(cond_np))
+    else:
+        ds = TensorDataset(torch.from_numpy(s_t_np), torch.from_numpy(delta_np))
     loader = DataLoader(ds, batch_size=int(cfg.batch_size), shuffle=True, drop_last=True)
 
     model = DiffusionTransitionModel(
@@ -90,6 +106,7 @@ def train_diffusion_transition(
         K=int(cfg.K),
         hidden_dim=int(cfg.hidden_dim),
         time_emb_dim=int(cfg.time_emb_dim),
+        cond_dim=int(cfg.cond_dim),
     ).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=float(cfg.lr))
 
@@ -101,11 +118,12 @@ def train_diffusion_transition(
         model.train()
         total = 0.0
         nb = 0
-        for s_t, delta in loader:
-            s_t = s_t.to(device)
-            delta = delta.to(device)
+        for batch in loader:
+            s_t = batch[0].to(device)
+            delta = batch[1].to(device)
+            cond = batch[2].to(device) if (cfg.cond_dim and len(batch) > 2) else None
             opt.zero_grad(set_to_none=True)
-            loss = model.training_loss(s_t, delta)
+            loss = model.training_loss(s_t, delta, cond=cond)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             opt.step()
@@ -133,6 +151,10 @@ def rollout_diffusion(
     T: int,
     stats: Dict[str, np.ndarray],
     device: Optional[str] = None,
+    cond_fn_raw: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    energy_model: Optional[torch.nn.Module] = None,
+    project_steps: int = 1,
+    project_eps: float = 1e-8,
 ) -> np.ndarray:
     """
     Rollout in standardized space then convert back to raw.
@@ -149,7 +171,56 @@ def rollout_diffusion(
 
     s0 = s0_raw.astype(np.float32)
     s0_z = (s0 - stats["mean"][None, :]) / stats["std"][None, :]
-    traj_z = model.rollout(torch.from_numpy(s0_z).to(dev), int(T)).detach().cpu().numpy().astype(np.float32)
+    s0_z_t = torch.from_numpy(s0_z).to(dev)
+
+    def _cond_fn(s_z: torch.Tensor, _t: int):
+        if cond_fn_raw is None:
+            return None
+        s_raw = (s_z.detach().cpu().numpy() * stats["std"][None, :] + stats["mean"][None, :]).astype(np.float32)
+        c = cond_fn_raw(s_raw).astype(np.float32)
+        if c.ndim == 1:
+            c = c[:, None]
+        return torch.from_numpy(c).to(dev)
+
+    H0 = None
+    if energy_model is not None and int(project_steps) > 0:
+        energy_model = energy_model.to(dev)
+        energy_model.eval()
+        with torch.no_grad():
+            H0 = energy_model(torch.tensor(s0, dtype=torch.float32, device=dev)).detach()  # (B,)
+
+    def _project_fn(s_z: torch.Tensor, _t: int):
+        if (energy_model is None) or (H0 is None) or int(project_steps) <= 0:
+            return s_z
+
+        mean_t = torch.tensor(stats["mean"], device=s_z.device)[None, :]
+        std_t = torch.tensor(stats["std"], device=s_z.device)[None, :]
+        s_raw = s_z * std_t + mean_t
+
+        # Project onto the level set energy_model(s)=H0 using first-order correction along grad.
+        with torch.enable_grad():
+            for _ in range(int(project_steps)):
+                s_raw = s_raw.detach().clone().requires_grad_(True)
+                H = energy_model(s_raw)  # (B,)
+                diff = (H - H0)
+                grad = torch.autograd.grad(H.sum(), s_raw, create_graph=False)[0]  # (B, D)
+                denom = torch.sum(grad * grad, dim=1, keepdim=True) + float(project_eps)
+                s_raw = (s_raw - diff.unsqueeze(1) * grad / denom).detach()
+
+        return (s_raw - mean_t) / std_t
+
+    traj_z = (
+        model.rollout(
+            s0_z_t,
+            int(T),
+            cond_fn=_cond_fn if cond_fn_raw is not None else None,
+            project_fn=_project_fn if energy_model is not None else None,
+        )
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
     traj_raw = _destandardize(traj_z, stats).astype(np.float32)
     return traj_raw
 

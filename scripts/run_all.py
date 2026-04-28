@@ -43,8 +43,7 @@ def main(args):
     from src.evaluation.validate_cdn import validate_conservation_model
     from src.evaluation.validate_diffusion import evaluate_diffusion_rollout
     from src.evaluation.sindy import STLSQConfig, format_sparse_equation, sindy_fit_energy
-    from src.models.cdn import ConservationDiscoveryNetwork
-    from src.training.train_cdn import train_conservation_model
+    from src.training.train_cdn import CDNTrainConfig, train_cdn
     from src.training.train_diffusion import DiffusionTrainConfig, train_diffusion_transition
     from src.training.train_polynomial import train_polynomial_model
     from src.training.train_structured_energy import StructuredEnergyConfig, train_structured_energy
@@ -133,20 +132,39 @@ def main(args):
         # Phase 2: CDN training on normalized data
         print("Training CDN (normalized)...")
         trajs_norm, stats = normalize_trajectories(trajs)
-        trajs_train, _ = train_val_split(trajs_norm, val_fraction=0.1, seed=42)
-        cdn = ConservationDiscoveryNetwork(state_dim=env["state_dim"], hidden_dim=256, n_layers=4).to(device)
-        cdn, _ = train_conservation_model(
-            model=cdn,
-            trajectories_np=trajs_train,
-            save_path=os.path.join("models", f"cdn_{env['name']}_best.pt"),
+        # Need a consistent split for both trajectories and energy0 alignment targets.
+        rng = np.random.RandomState(42)
+        nN = trajs_norm.shape[0]
+        perm = rng.permutation(nN)
+        split = int(nN * 0.9)
+        train_idx = perm[:split]
+        trajs_train = trajs_norm[train_idx]
+        energy0_train = E[train_idx, 0]
+        shared_epochs = int(args.epochs_all) if args.epochs_all is not None else None
+
+        # CDN with alignment + scale constraints so f(s) correlates with analytical energy.
+        cdn_cfg = CDNTrainConfig(
+            env_name=env["name"],
+            state_dim=env["state_dim"],
+            hidden_dim=256,
+            n_layers=4,
             lr=1e-3,
-            epochs=args.cdn_epochs,
+            epochs=int(shared_epochs or args.cdn_epochs),
             batch_size=512,
             lambda_var=0.5,
             epsilon=10.0,
-            device=device,
-            model_name=f"CDN {env['name']}",
+            var_reg="hinge",
+            lambda_scale=0.05,
+            target_mean=0.0,
+            std_min=0.8,
+            std_max=1.2,
+            lambda_align=0.2,
+            grad_clip=1.0,
+            log_every=50,
+            save_dir="models",
+            device=str(device),
         )
+        cdn, _ = train_cdn(trajs_train, cdn_cfg, energy0_np=energy0_train)
 
         # Validate CDN: compare learned f(s) to analytical energy (on raw units)
         def energy_from_norm(t_norm):
@@ -164,37 +182,6 @@ def main(args):
         )
         all_results[f"cdn_{env['name']}"] = cdn_val
 
-        # Phase 2c: Diffusion transition baseline (RAW trajectories -> rollout)
-        if args.run_diffusion:
-            print("Training diffusion transition model (RAW -> rollout)...")
-            trajs_train_raw, trajs_val_raw = train_val_split(trajs, val_fraction=0.1, seed=42)
-            diff_cfg = DiffusionTrainConfig(
-                env_name=env["name"],
-                state_dim=env["state_dim"],
-                K=args.diffusion_steps,
-                hidden_dim=args.diffusion_hidden_dim,
-                time_emb_dim=args.diffusion_time_emb_dim,
-                lr=args.diffusion_lr,
-                epochs=args.diffusion_epochs,
-                batch_size=args.diffusion_batch_size,
-                max_train_trajectories=args.diffusion_max_train_trajectories,
-                device=str(device),
-                save_dir="models",
-                log_every=max(1, args.diffusion_epochs // 10),
-            )
-            diff_model, diff_stats, _ = train_diffusion_transition(trajs_train_raw, cfg=diff_cfg)
-            diff_metrics = evaluate_diffusion_rollout(
-                model=diff_model,
-                trajs_raw=trajs_val_raw,
-                energy_fn_np=env["energy"],
-                env_name=env["name"],
-                stats=diff_stats,
-                n_rollouts=args.diffusion_eval_rollouts,
-                device=str(device),
-                save_dir="figures",
-            )
-            all_results[f"diffusion_{env['name']}"] = diff_metrics
-
         # Phase 2b: Structured Energy Network baseline (optional)
         if args.run_structured_energy:
             print("Training structured energy network (RAW)...")
@@ -211,6 +198,7 @@ def main(args):
                 pos_dims=pos_dims,
                 vel_dims=vel_dims,
                 device=str(device),
+                epochs=int(shared_epochs or args.structured_epochs),
             )
             structured_model, _ = train_structured_energy(trajs, energy0_np=E[:, 0], cfg=structured_cfg)
             structured_val = validate_conservation_model(
@@ -223,6 +211,8 @@ def main(args):
                 device=device,
             )
             all_results[f"structured_energy_{env['name']}"] = structured_val
+        else:
+            structured_model = None
 
         # Phase 3: Polynomial model on RAW data (with energy alignment to pin scale)
         print("Training polynomial model (RAW)...")
@@ -237,7 +227,7 @@ def main(args):
             degree=env["poly_degree"],
             include_trig_dims=env["trig_dims"],
             lr=args.poly_lr,
-            epochs=args.poly_epochs,
+            epochs=int(shared_epochs or args.poly_epochs),
             batch_size=args.poly_batch_size,
             device=device,
             warmup_epochs=args.poly_warmup_epochs,
@@ -260,6 +250,63 @@ def main(args):
         # Phase 4: Probing (Polynomial)
         probe = probe_all_dimensions(poly_model, trajs, env["var_names"], device=str(device))
         all_results[f"probe_{env['name']}"] = probe
+
+        # Phase 4c: Diffusion transition baseline (RAW -> rollout)
+        # Condition on CDN's learned invariant f(s) and apply manifold projection via StructuredEnergyNetwork (if enabled).
+        if args.run_diffusion:
+            print("Training diffusion transition model (RAW -> rollout, conditioned on CDN f(s))...")
+            trajs_train_raw, trajs_val_raw = train_val_split(trajs, val_fraction=0.1, seed=42)
+
+            # Build conditioning values for each transition state in the training set: c = f_cdn(s_t)
+            cdn_device = next(cdn.parameters()).device
+            cdn.eval()
+            flat_raw = trajs_train_raw[:, :-1, :].reshape(-1, env["state_dim"]).astype(np.float32)
+            flat_norm = (flat_raw - stats["min"][None, :]) / stats["range"][None, :]
+            cond_chunks = []
+            bs = 16384
+            with torch.no_grad():
+                for i in range(0, flat_norm.shape[0], bs):
+                    x = torch.tensor(flat_norm[i : i + bs], dtype=torch.float32, device=cdn_device)
+                    cond_chunks.append(cdn(x).detach().cpu().numpy().astype(np.float32))
+            cond_np = np.concatenate(cond_chunks, axis=0).reshape(-1, 1)
+
+            diff_cfg = DiffusionTrainConfig(
+                env_name=env["name"],
+                state_dim=env["state_dim"],
+                K=args.diffusion_steps,
+                hidden_dim=args.diffusion_hidden_dim,
+                time_emb_dim=args.diffusion_time_emb_dim,
+                lr=args.diffusion_lr,
+                epochs=int(shared_epochs or args.diffusion_epochs),
+                batch_size=args.diffusion_batch_size,
+                max_train_trajectories=args.diffusion_max_train_trajectories,
+                device=str(device),
+                save_dir="models",
+                log_every=max(1, int((shared_epochs or args.diffusion_epochs)) // 10),
+                cond_dim=1,
+            )
+            diff_model, diff_stats, _ = train_diffusion_transition(trajs_train_raw, cfg=diff_cfg, cond_np=cond_np)
+
+            def cond_fn_raw(s_raw_2d: np.ndarray) -> np.ndarray:
+                s_norm_2d = (s_raw_2d - stats["min"][None, :]) / stats["range"][None, :]
+                with torch.no_grad():
+                    x = torch.tensor(s_norm_2d, dtype=torch.float32, device=cdn_device)
+                    return cdn(x).detach().cpu().numpy().astype(np.float32)
+
+            diff_metrics = evaluate_diffusion_rollout(
+                model=diff_model,
+                trajs_raw=trajs_val_raw,
+                energy_fn_np=env["energy"],
+                env_name=env["name"],
+                stats=diff_stats,
+                n_rollouts=args.diffusion_eval_rollouts,
+                device=str(device),
+                save_dir="figures",
+                cond_fn_raw=cond_fn_raw,
+                energy_model=structured_model if (structured_model is not None and args.diffusion_project_manifold) else None,
+                project_steps=int(args.diffusion_project_steps),
+            )
+            all_results[f"diffusion_{env['name']}"] = diff_metrics
 
         # Phase 4b: SINDy (STLSQ) sparse regression baseline (optional)
         if args.run_sindy:
@@ -338,8 +385,10 @@ if __name__ == "__main__":
     parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_diffusion", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--epochs_all", type=int, default=None, help="If set, use this epoch count for all models.")
 
     parser.add_argument("--cdn_epochs", type=int, default=200)
+    parser.add_argument("--structured_epochs", type=int, default=300)
     parser.add_argument("--poly_epochs", type=int, default=2000)
     parser.add_argument("--poly_lr", type=float, default=0.005)
     parser.add_argument("--poly_batch_size", type=int, default=4096)
@@ -360,5 +409,7 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_time_emb_dim", type=int, default=64)
     parser.add_argument("--diffusion_max_train_trajectories", type=int, default=200000)
     parser.add_argument("--diffusion_eval_rollouts", type=int, default=256)
+    parser.add_argument("--diffusion_project_manifold", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--diffusion_project_steps", type=int, default=1)
     main(parser.parse_args())
 

@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=physics-discovery
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:h200:1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=128G
+#SBATCH --partition=gpu_devel
+#SBATCH --gres=gpu:rtx_5000_ada:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
 #SBATCH --time=06:00:00
 #SBATCH --output=results/slurm_%j.log
 #SBATCH --error=results/slurm_%j.err
@@ -25,5 +25,15 @@ python -u scripts/run_all.py \
   --device cuda \
   --data_dir data \
   --save_dir results \
+  --n_trajectories 20000 \
+  --n_timesteps 100 \
+  --cdn_epochs 256 \
+  --epochs_rest 256 \
+  --poly_lambda_energy 1.0 \
+  --poly_lambda_var 1.0 \
+  --poly_warmup_epochs 100 \
+  --skip_pysr \
+  --diffusion_max_train_trajectories 20000 \
+  --diffusion_eval_rollouts 64 \
+  --noise_std 0.0 \
   2>&1 | tee results/experiment_log.txt
-

@@ -1,0 +1,28 @@
+The following modules were not unloaded:
+  (Use "module --force purge" to unload all):
+
+  1) StdEnv
+/apps/software/2024a/software/PyTorch/2.7.1-foss-2024a-CUDA-12.6.0/lib/python3.12/site-packages/torch/cuda/__init__.py:287: UserWarning: 
+NVIDIA B200 with CUDA capability sm_100 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_70 sm_75 sm_80 sm_86 sm_89 sm_90.
+If you want to use the NVIDIA B200 GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+  warnings.warn(
+/home/cpsc4520_ajb287/452finalproject/src/training/train_cdn_streaming.py:49: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  scaler = torch.cuda.amp.GradScaler(enabled=(cfg.amp and device.startswith("cuda")))
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/cpsc4520_ajb287/452finalproject/scripts/run_big_hpc_experiment.py", line 74, in <module>
+    train_cdn_streaming(make_batch, cfg)
+  File "/home/cpsc4520_ajb287/452finalproject/src/training/train_cdn_streaming.py", line 62, in train_cdn_streaming
+    traj, e0 = make_batch()
+               ^^^^^^^^^^^^
+  File "/home/cpsc4520_ajb287/452finalproject/scripts/run_big_hpc_experiment.py", line 29, in _fn
+    theta0 = (theta_range[0] + (theta_range[1] - theta_range[0]) * torch.rand(batch_size, device=device))
+                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: CUDA error: no kernel image is available for execution on the device
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+

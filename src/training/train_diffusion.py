@@ -90,6 +90,10 @@ def train_diffusion_transition(
         cond_np = np.asarray(cond_np, dtype=np.float32)
         if cond_np.ndim == 1:
             cond_np = cond_np[:, None]
+        # If the caller computed cond_np for a larger dataset (e.g. before truncating to
+        # max_train_trajectories), trim to the exact number of transitions used here.
+        if cond_np.shape[0] > s_t_np.shape[0]:
+            cond_np = cond_np[: s_t_np.shape[0], :]
         if cond_np.shape[0] != s_t_np.shape[0]:
             raise ValueError(f"cond_np rows {cond_np.shape[0]} != s_t rows {s_t_np.shape[0]}")
         if cond_np.shape[1] != int(cfg.cond_dim):

@@ -21,19 +21,4 @@ echo "Starting physics discovery experiment"
 echo "Job ID: ${SLURM_JOB_ID}"
 echo "Node: ${SLURM_NODELIST}"
 
-python -u scripts/run_all.py \
-  --device cuda \
-  --data_dir data \
-  --save_dir results \
-  --n_trajectories 20000 \
-  --n_timesteps 100 \
-  --cdn_epochs 256 \
-  --epochs_rest 256 \
-  --poly_lambda_energy 1.0 \
-  --poly_lambda_var 1.0 \
-  --poly_warmup_epochs 100 \
-  --skip_pysr \
-  --diffusion_max_train_trajectories 20000 \
-  --diffusion_eval_rollouts 64 \
-  --noise_std 0.0 \
-  2>&1 | tee results/experiment_log.txt
+python -u scripts/run_all.py --device cuda --data_dir data --save_dir results_noise_0p01 --noise_std 0.01 --skip_pysr --no-run_diffusion --cdn_epochs 50 --structured_epochs 100 --poly_epochs 200

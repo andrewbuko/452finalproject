@@ -1,0 +1,5 @@
+{
+  "rollout_mse": 0.001811365014873445,
+  "energy_std_mean_true": 1.4761521015316248e-05,
+  "energy_std_mean_gen": 0.11193825304508209
+}

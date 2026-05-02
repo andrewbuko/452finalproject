@@ -1,6 +1,6 @@
 # Discovering Conservation Laws from Trajectories
 
-CPSC 452 final project. Given only state trajectories from three classical systems with closed-form ground-truth energies (2D projectile, simple pendulum, spring-mass), the goal is to recover a scalar invariant that is conserved along trajectories and, where possible, the symbolic expression for it. Implementations live in `src/`, the runner is `scripts/run_all.py`, and the four-model comparison notebook is `notebooks/full_run.ipynb`.
+CPSC 452 final project. Given only state trajectories from three classical systems with closed-form ground-truth energies (2D projectile, simple pendulum, spring-mass), the goal is to recover a scalar invariant that is conserved along trajectories and, where possible, the symbolic expression for it. Implementations live in `src/` and the runner is `scripts/run_all.py`.
 
 ## 1. CDN (Conservation Dynamics Network)
 

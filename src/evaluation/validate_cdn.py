@@ -26,6 +26,7 @@ def validate_cdn(
     env_name: str,
     n_samples: int = 5000,
     save_dir: str = "figures",
+    model_name: str = "CDN",
 ):
     """scatter learned f(s) vs analytical energy and report r2/spearman/conservation std."""
     plt.rcParams.update({"font.family": "serif", "font.size": 10, "figure.dpi": 150})
@@ -64,15 +65,16 @@ def validate_cdn(
     ax.plot(x_line, np.polyval(z, x_line), "r--", linewidth=1.5, label=f"R$^2$={r2:.4f}  Spearman={spearman:.3f}")
     ax.set_xlabel("Analytical Energy E(s)")
     ax.set_ylabel("Learned Conserved Quantity f(s)")
-    ax.set_title(f"CDN Validation — {env_name.capitalize()}")
+    ax.set_title(f"{model_name} validation — {env_name.replace('_', ' ').capitalize()}")
     ax.legend(fontsize=11, loc="upper left")
     fig.tight_layout()
 
-    out_path = os.path.join(save_dir, f"cdn_validation_{env_name}.png")
+    fname = f"{model_name.lower()}_validation_{env_name}.png"
+    out_path = os.path.join(save_dir, fname)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
-    print(f"  {env_name}: r2={r2:.4f}  spearman={spearman:.4f}  inv_std={invariant_std_mean:.3e}")
+    print(f"  {model_name} {env_name}: r2={r2:.4f}  spearman={spearman:.4f}  inv_std={invariant_std_mean:.3e}")
     return {
         "r_squared": float(r2),
         "pearson": float(r),
@@ -96,7 +98,10 @@ def validate_conservation_model(
     _ = save_dir
     if device is not None:
         model = model.to(device)
-    out = validate_cdn(model, trajs_np, energy_fn_np, env_name, n_samples=n_samples, save_dir=save_dir)
+    out = validate_cdn(
+        model, trajs_np, energy_fn_np, env_name,
+        n_samples=n_samples, save_dir=save_dir, model_name=str(model_name),
+    )
     out["model_name"] = str(model_name)
     return out
 

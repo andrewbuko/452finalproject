@@ -6,7 +6,6 @@ __pycache__/
 .DS_Store
 .ipynb_checkpoints/
 
-# big artifacts that shouldn't live in git
 data/**/*.npy
 models/**/*.pt
 models/**/*.npz
@@ -14,7 +13,6 @@ models/**/*_history.npy
 figures/*.png
 figures/*.json
 
-# scratch/output dirs
 results/
 results_smoke/
 artifacts/

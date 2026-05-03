@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash 
 #SBATCH --job-name=physics-discovery
 #SBATCH --partition=gpu_devel
 #SBATCH --gres=gpu:rtx_5000_ada:1

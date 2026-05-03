@@ -1,13 +1,4 @@
-"""
-Pendulum trajectory generation.
-State vector: [theta, omega] where theta is angle and omega is angular velocity.
-ODE:
-  dtheta/dt = omega
-  domega/dt = -(g/l) * sin(theta)
-Conserved quantity (Hamiltonian):
-  H = 0.5*m*l^2*omega^2 - m*g*l*cos(theta)
-With m=1, l=1: H = 0.5*omega^2 - 9.81*cos(theta)
-"""
+"""pendulum trajectories via rk45. state=[theta, omega], H = 0.5*omega^2 - 9.81*cos(theta) (m=l=1)."""
 
 import json
 import os
@@ -24,7 +15,6 @@ def _pendulum_ode(t, state, g, l):
 
 
 def _solve_single(args):
-    """Solve one pendulum trajectory. For parallel execution."""
     theta0, omega0, g, l, t_eval, rtol, atol = args
     sol = solve_ivp(
         _pendulum_ode,
@@ -37,7 +27,7 @@ def _solve_single(args):
         atol=atol,
     )
     if not sol.success or np.any(np.isnan(sol.y)):
-        raise RuntimeError("Pendulum solve failed")
+        raise RuntimeError("pendulum solve failed")
     return sol.y.T.astype(np.float32)
 
 
@@ -56,10 +46,7 @@ def generate_pendulum_data(
     rtol=1e-12,
     atol=1e-14,
 ):
-    """
-    Generate pendulum trajectories via RK45 integration.
-    Uses tight tolerances to ensure energy conservation in the generated data.
-    """
+    """generate pendulum trajectories with tight rk45 tolerances so energy is conserved."""
     rng = np.random.RandomState(seed)
     t_end = (n_timesteps - 1) * dt
     t_eval = np.linspace(0, t_end, n_timesteps)
@@ -71,21 +58,21 @@ def generate_pendulum_data(
         n_workers = min(cpu_count(), 16)
     n_workers = max(1, int(n_workers))
 
-    # IMPORTANT: don't materialize a giant Python list at H200 scale.
+    # generator avoids materializing a giant python list at H200 scale
     args_iter = ((theta0s[i], omega0s[i], g, l, t_eval, rtol, atol) for i in range(n_trajectories))
 
     if n_workers == 1:
         results = []
-        for a in tqdm(args_iter, total=n_trajectories, desc="Pendulum trajectories"):
+        for a in tqdm(args_iter, total=n_trajectories, desc="pendulum"):
             results.append(_solve_single(a))
     else:
-        print(f"Generating {n_trajectories} pendulum trajectories with {n_workers} workers...")
+        print(f"  generating {n_trajectories} pendulum trajectories with {n_workers} workers")
         with Pool(n_workers) as pool:
             results = list(
                 tqdm(
                     pool.imap(_solve_single, args_iter, chunksize=1000),
                     total=n_trajectories,
-                    desc="Pendulum trajectories",
+                    desc="pendulum",
                 )
             )
 
@@ -111,7 +98,7 @@ def generate_pendulum_data(
         }
         with open(os.path.join(save_dir, "params.json"), "w", encoding="utf-8") as f:
             json.dump(params, f, indent=2)
-        print(f"Saved {n_trajectories} pendulum trajectories to {save_dir}")
+        print(f"  saved {n_trajectories} pendulum trajectories -> {save_dir}")
 
     return trajectories
 

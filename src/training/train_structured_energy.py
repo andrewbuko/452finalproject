@@ -1,9 +1,4 @@
-"""
-Training loop for StructuredEnergyNetwork.
-
-Uses the same conservation loss as CDN/polynomial, and adds energy alignment
-to pin scale/offset so coefficients are in physical units.
-"""
+"""trainer for StructuredEnergyNetwork. same conservation loss as cdn/polynomial plus energy alignment."""
 
 from __future__ import annotations
 
@@ -51,7 +46,7 @@ def train_structured_energy(
     os.makedirs(cfg.save_dir, exist_ok=True)
     ckpt_path = os.path.join(cfg.save_dir, f"structured_energy_{cfg.env_name}_best.pt")
 
-    # epsilon heuristic from energy0 variance (so the variance hinge is not too strict)
+    # epsilon heuristic from energy0 variance so the variance hinge is not too strict
     if cfg.epsilon is None:
         evar = float(np.var(energy0_np[:5000]))
         cfg.epsilon = max(evar * 0.1, 1.0)
@@ -104,7 +99,7 @@ def train_structured_energy(
             best = avg
             torch.save(model.state_dict(), ckpt_path)
         if (epoch + 1) % 50 == 0:
-            print(f"[structured {cfg.env_name}] epoch {epoch+1}/{cfg.epochs} loss={avg:.6f} best={best:.6f}")
+            print(f"  structured {cfg.env_name} ep {epoch+1}/{cfg.epochs} loss={avg:.6f} best={best:.6f}")
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     return model, history

@@ -1,6 +1,4 @@
-"""
-Generate the hero figure: discovered vs known equations for all environments.
-"""
+"""hero figure: discovered vs known equations across environments."""
 
 import os
 
@@ -70,5 +68,4 @@ def create_hero_figure(
     path = os.path.join(save_dir, "hero_equation_comparison.png")
     fig.savefig(path, dpi=200, bbox_inches="tight")
     plt.close(fig)
-    print(f"Saved hero figure: {path}")
 

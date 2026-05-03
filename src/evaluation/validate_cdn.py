@@ -27,16 +27,7 @@ def validate_cdn(
     n_samples: int = 5000,
     save_dir: str = "figures",
 ):
-    """
-    Scatter plot of learned f(s) vs analytical energy E(s) over random states.
-
-    Args:
-      model: CDN, trained on the same scaling as trajs_np
-      trajs_np: (N, T, D)
-      energy_fn_np: function(trajs_np) -> (N, T)
-    Returns:
-      r_squared: float
-    """
+    """scatter learned f(s) vs analytical energy and report r2/spearman/conservation std."""
     plt.rcParams.update({"font.family": "serif", "font.size": 10, "figure.dpi": 150})
     os.makedirs(save_dir, exist_ok=True)
 
@@ -61,7 +52,7 @@ def validate_cdn(
     sr, _ = spearmanr(f_learned, e_analytical)
     spearman = float(sr) if np.isfinite(sr) else 0.0
 
-    # Conservation error of learned invariant: mean over trajectories of std_t(f(s_t))
+    # conservation: mean over trajectories of std_t(f(s_t)). lower is better
     f_traj = _eval_model_on_states(model, trajs_np.reshape(-1, D), device=device).reshape(N, T)
     invariant_std_mean = float(np.std(f_traj, axis=1).mean())
     energy_std_mean = float(np.std(energy_fn_np(trajs_np), axis=1).mean())
@@ -81,8 +72,7 @@ def validate_cdn(
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
-    print(f"[{env_name}] Pearson r = {r:.4f}, R^2 = {r2:.4f}, Spearman = {spearman:.4f}")
-    print(f"Saved {out_path}")
+    print(f"  {env_name}: r2={r2:.4f}  spearman={spearman:.4f}  inv_std={invariant_std_mean:.3e}")
     return {
         "r_squared": float(r2),
         "pearson": float(r),
@@ -102,11 +92,8 @@ def validate_conservation_model(
     n_samples=10000,
     device=None,
 ):
-    """
-    Compatibility wrapper used by scripts/run_all.py.
-    Returns a dict with r_squared and spearman (spearman omitted here for simplicity).
-    """
-    _ = save_dir  # validate_cdn writes to figures/ already
+    """thin wrapper around validate_cdn that tags the output with model_name."""
+    _ = save_dir
     if device is not None:
         model = model.to(device)
     out = validate_cdn(model, trajs_np, energy_fn_np, env_name, n_samples=n_samples, save_dir=save_dir)

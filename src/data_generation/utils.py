@@ -2,15 +2,7 @@ import numpy as np
 
 
 def normalize_trajectories(trajs: np.ndarray):
-    """
-    Per-feature min-max normalization to [0, 1].
-
-    Args:
-      trajs: (N, T, D)
-    Returns:
-      normed: (N, T, D)
-      stats: dict with 'min', 'max', 'range' arrays of shape (D,)
-    """
+    """per-feature min-max to [0,1]. returns (normed, {'min','max','range'})."""
     _, _, D = trajs.shape
     flat = trajs.reshape(-1, D)
     mins = flat.min(axis=0)
@@ -27,15 +19,7 @@ def denormalize_trajectories(normed: np.ndarray, stats):
 
 
 def standardize_trajectories(trajs: np.ndarray, eps: float = 1e-8):
-    """
-    Per-feature standardization to mean 0, std 1 over the entire dataset/time.
-
-    Args:
-      trajs: (N, T, D)
-    Returns:
-      z: (N, T, D)
-      stats: dict with 'mean', 'std'
-    """
+    """per-feature standardize to mean 0, std 1. returns (z, {'mean','std'})."""
     _, _, D = trajs.shape
     flat = trajs.reshape(-1, D)
     mean = flat.mean(axis=0)
@@ -50,19 +34,13 @@ def destandardize_trajectories(z: np.ndarray, stats):
 
 
 def scale_trajectories(trajs: np.ndarray, mode: str = "minmax01"):
-    """
-    Convenience wrapper for common scaling modes.
-
-    mode:
-      - 'minmax01' -> [0, 1]
-      - 'standardize' -> mean 0, std 1
-    """
+    """mode in {'minmax01', 'standardize'}."""
     mode = mode.lower()
     if mode == "minmax01":
         return normalize_trajectories(trajs)
     if mode == "standardize":
         return standardize_trajectories(trajs)
-    raise ValueError(f"Unknown scaling mode: {mode}")
+    raise ValueError(f"unknown scaling mode: {mode}")
 
 
 def unscale_trajectories(scaled: np.ndarray, stats, mode: str = "minmax01"):
@@ -71,7 +49,7 @@ def unscale_trajectories(scaled: np.ndarray, stats, mode: str = "minmax01"):
         return denormalize_trajectories(scaled, stats)
     if mode == "standardize":
         return destandardize_trajectories(scaled, stats)
-    raise ValueError(f"Unknown scaling mode: {mode}")
+    raise ValueError(f"unknown scaling mode: {mode}")
 
 
 def train_val_split(trajs: np.ndarray, val_fraction: float = 0.1, seed: int = 42):

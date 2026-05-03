@@ -14,10 +14,7 @@ class STLSQConfig:
 
 
 def stlsq(Theta: np.ndarray, y: np.ndarray, cfg: STLSQConfig) -> np.ndarray:
-    """
-    Sequentially Thresholded Least Squares (SINDy-style) for sparse regression:
-      min ||Theta w - y||_2 with iterative hard-thresholding on small coefficients.
-    """
+    """sequentially thresholded least squares: min ||Theta w - y||_2 with iterative hard-thresholding."""
     Theta = np.asarray(Theta, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64).reshape(-1)
     if Theta.ndim != 2:
@@ -31,7 +28,6 @@ def stlsq(Theta: np.ndarray, y: np.ndarray, cfg: STLSQConfig) -> np.ndarray:
         col_scale = np.linalg.norm(Theta, axis=0) + 1e-12
         Theta_n = Theta / col_scale[None, :]
 
-    # initial least squares
     w = np.linalg.lstsq(Theta_n, y, rcond=None)[0]
     keep = np.ones_like(w, dtype=bool)
 
@@ -48,16 +44,11 @@ def stlsq(Theta: np.ndarray, y: np.ndarray, cfg: STLSQConfig) -> np.ndarray:
         w[:] = 0.0
         w[keep] = w_keep
 
-    # unnormalize back to original Theta columns
-    w = w / col_scale
-    return w
+    return w / col_scale
 
 
 def build_library_projectile(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
-    """
-    X: (N,4) [x,y,vx,vy]
-    Terms match PolynomialConservationModel's projectile library.
-    """
+    """projectile basis. X: (N,4) [x,y,vx,vy]. matches PolynomialConservation's projectile library."""
     x, y, vx, vy = X[:, 0], X[:, 1], X[:, 2], X[:, 3]
     Theta = np.column_stack(
         [
@@ -99,9 +90,7 @@ def build_library_projectile(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
 
 
 def build_library_pendulum(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
-    """
-    X: (N,2) [theta,omega]
-    """
+    """pendulum basis with cos/sin(theta). X: (N,2) [theta,omega]."""
     th, om = X[:, 0], X[:, 1]
     Theta = np.column_stack(
         [
@@ -120,9 +109,7 @@ def build_library_pendulum(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
 
 
 def build_library_spring_mass(X: np.ndarray) -> Tuple[np.ndarray, List[str]]:
-    """
-    X: (N,2) [x,v]
-    """
+    """spring-mass basis. X: (N,2) [x,v]."""
     x, v = X[:, 0], X[:, 1]
     Theta = np.column_stack([np.ones_like(x), x, v, x * x, x * v, v * v])
     names = ["1", "x", "v", "x^2", "x*v", "v^2"]

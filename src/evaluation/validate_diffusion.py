@@ -22,14 +22,7 @@ def evaluate_diffusion_rollout(
     energy_model=None,
     project_steps: int = 1,
 ) -> Dict[str, float]:
-    """
-    Compare diffusion rollouts vs ground truth on a subset of trajectories.
-
-    Metrics:
-      - rollout_mse: mean squared error over all timesteps/dims
-      - energy_std_mean_true: mean over trajectories of std_t(E)
-      - energy_std_mean_gen: same for generated rollouts
-    """
+    """rollout the diffusion model and compare mse + per-trajectory energy std vs ground truth."""
     os.makedirs(save_dir, exist_ok=True)
     rng = np.random.RandomState(0)
 
@@ -63,7 +56,6 @@ def evaluate_diffusion_rollout(
         "energy_std_mean_gen": energy_std_mean_gen,
     }
 
-    # Persist a small JSON for the experiment_results payload
     try:
         import json
 
@@ -73,8 +65,8 @@ def evaluate_diffusion_rollout(
         pass
 
     print(
-        f"[diffusion {env_name}] rollout_mse={rollout_mse:.6e} "
-        f"energy_std_mean(gen)={energy_std_mean_gen:.3e} true={energy_std_mean_true:.3e}"
+        f"  diffusion {env_name}: mse={rollout_mse:.3e} "
+        f"E_std(gen)={energy_std_mean_gen:.3e} (true={energy_std_mean_true:.3e})"
     )
     return out
 

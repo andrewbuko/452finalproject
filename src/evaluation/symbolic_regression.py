@@ -21,8 +21,7 @@ def _import_pysr():
 
 
 def pysr_available() -> bool:
-    # Important: importing `pysr` may trigger Julia initialization (slow/hang on some setups).
-    # So only check for package presence here.
+    # importing pysr triggers julia init; just check for package presence
     import importlib.util
 
     return importlib.util.find_spec("pysr") is not None
@@ -41,17 +40,9 @@ def run_symbolic_regression(
     maxsize=20,
     seed=42,
 ):
-    """
-    Run PySR symbolic regression.
-    Args:
-      trajs_np: (N, T, D) RAW trajectories
-      target_fn: callable(states_2D) -> targets_1D
-      variable_names: list[str]
-    Returns:
-      reg, best_equation_string
-    """
+    """run pysr on raw trajectories. returns (reg, best_equation_string)."""
     if not pysr_available():
-        print("PySR not installed. Run: pip install pysr")
+        print("pysr not installed; skipping (pip install pysr)")
         return None, "PySR not available"
 
     PySRRegressor = _import_pysr()
@@ -67,11 +58,7 @@ def run_symbolic_regression(
     X = all_states[idx].astype(np.float64)
     y = target_fn(X).astype(np.float64)
 
-    print(f"\nRunning PySR on {env_name}...")
-    print(f" X shape: {X.shape}, y shape: {y.shape}")
-    print(f" Operators: binary={binary_operators}, unary={unary_operators}")
-    print(f" Variables: {variable_names}")
-    print(f" Iterations: {niterations}")
+    print(f"  pysr {env_name}: X={X.shape} y={y.shape} ops={unary_operators+binary_operators} iters={niterations}")
 
     reg = PySRRegressor(
         niterations=int(niterations),
@@ -96,7 +83,6 @@ def run_symbolic_regression(
 
     best_eq = best_equation_string(reg)
 
-    # Save results
     os.makedirs(save_dir, exist_ok=True)
     try:
         equations = reg.equations_
@@ -176,14 +162,13 @@ def sample_states_and_targets(
     X = flat[idx].astype(np.float64)
     y = target_fn(X)
     if y.ndim == 2:
-        # if someone passes a trajectory-energy function, take t=0
+        # if a trajectory-energy fn was passed, take t=0
         y = y[:, 0]
     y = y.astype(np.float64)
     return X, y
 
 
 def best_equation_string(reg) -> str:
-    # Best equation chosen by PySR's model_selection
     try:
         return str(reg.sympy())
     except Exception:
@@ -198,22 +183,18 @@ class ParetoPoint:
 
 
 def analyze_discovered_equations(reg, save_path: str = "figures/pysr_pareto.png"):
-    """
-    Save a Pareto front plot and print the top candidates.
-    """
+    """save the pareto front plot and print top candidates."""
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     eqs = reg.equations_
     pts: List[ParetoPoint] = []
     for _, row in eqs.iterrows():
         pts.append(ParetoPoint(int(row["complexity"]), float(row["loss"]), str(row["equation"])))
 
-    # print a few
     pts_sorted = sorted(pts, key=lambda p: (p.loss, p.complexity))[:10]
-    print("\nTop PySR candidates (loss, complexity):")
+    print("  pysr top candidates:")
     for p in pts_sorted:
-        print(f"  loss={p.loss:.4e}  complexity={p.complexity:2d}  eq={p.equation}")
+        print(f"    loss={p.loss:.4e}  c={p.complexity:2d}  eq={p.equation}")
 
-    # plot Pareto
     xs = [p.complexity for p in pts]
     ys = [p.loss for p in pts]
     plt.figure(figsize=(7, 5), dpi=150)
@@ -236,10 +217,7 @@ def validate_discovered_equation(
     device: str = "cpu",
     save_path: str = "figures/equation_validation.png",
 ):
-    """
-    Compare equation output with CDN output and (optionally) analytical energy.
-    Plots time-series constancy and correlations.
-    """
+    """compare pysr equation output to cdn output along trajectories (constancy + per-traj std)."""
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
     T = trajectories_raw.shape[1]
@@ -247,7 +225,6 @@ def validate_discovered_equation(
     y_cdn = _eval_model_on_states(cdn_model, flat, device=device).reshape(-1, T)
     y_eq = reg.predict(flat).reshape(-1, T)
 
-    # per-trajectory std (smaller is better conservation)
     cdn_std = np.std(y_cdn, axis=1)
     eq_std = np.std(y_eq, axis=1)
 

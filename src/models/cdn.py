@@ -3,9 +3,7 @@ import torch.nn as nn
 
 
 class ConservationDiscoveryNetwork(nn.Module):
-    """
-    MLP mapping state s_t (R^D) -> scalar f(s_t) intended to be conserved along a trajectory.
-    """
+    """mlp s_t -> scalar f(s_t) trained to be conserved along trajectories."""
 
     def __init__(self, state_dim: int, hidden_dim: int = 256, n_layers: int = 4):
         super().__init__()
@@ -22,11 +20,4 @@ class ConservationDiscoveryNetwork(nn.Module):
         self.net = nn.Sequential(*layers)
 
     def forward(self, s: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            s: (B, D) tensor of states
-        Returns:
-            (B,) tensor of scalar values
-        """
         return self.net(s).squeeze(-1)
-

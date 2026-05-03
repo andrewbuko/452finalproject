@@ -30,7 +30,7 @@ def probe_single_dimension(
 
 
 def probe_all_dimensions(model, trajs_np: np.ndarray, dim_names, device: str = "cpu"):
-    # base = median state over the whole dataset/time
+    # median state of the dataset is the base; sweep one dimension at a time
     flat = trajs_np.reshape(-1, trajs_np.shape[-1])
     base = np.median(flat, axis=0)
     results: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
@@ -41,8 +41,7 @@ def probe_all_dimensions(model, trajs_np: np.ndarray, dim_names, device: str = "
         if not np.isfinite(lo) or not np.isfinite(hi):
             lo, hi = float(np.nanmin(flat[:, i])), float(np.nanmax(flat[:, i]))
         if lo == hi:
-            # Dimension is effectively constant in the dataset (e.g., vx fixed across trajectories).
-            # Create a tiny sweep range so downstream fitting/plotting doesn't blow up.
+            # dimension is effectively constant (e.g. vx fixed); make a tiny sweep range
             eps = 1e-3 if lo == 0 else abs(lo) * 1e-3
             lo, hi = float(lo - eps), float(hi + eps)
         results[name] = probe_single_dimension(model, base, i, (lo, hi), n_points=200, device=device)
@@ -51,14 +50,7 @@ def probe_all_dimensions(model, trajs_np: np.ndarray, dim_names, device: str = "
 
 
 def fit_symbolic_to_probe(dim_values: np.ndarray, f_values: np.ndarray, mode: str, max_degree: int = 4):
-    """
-    mode:
-      - 'constant' -> constant fit
-      - 'linear'   -> degree-1 poly
-      - 'quadratic'-> degree-2 poly
-      - 'poly'     -> degree=max_degree poly
-      - 'cosine'   -> a*cos(x) + b
-    """
+    """fit a closed form to a 1d probe sweep. mode in {constant, linear, quadratic, poly, cosine}."""
     x = dim_values.astype(np.float64)
     y = f_values.astype(np.float64)
 
@@ -72,7 +64,7 @@ def fit_symbolic_to_probe(dim_values: np.ndarray, f_values: np.ndarray, mode: st
 
     if mode in ("linear", "quadratic", "poly"):
         deg = 1 if mode == "linear" else (2 if mode == "quadratic" else max_degree)
-        # Guard against singular/ill-conditioned least squares when x is nearly constant.
+        # nearly-constant x leads to singular lstsq
         if np.std(x) < 1e-10:
             return fit_symbolic_to_probe(dim_values, f_values, mode="constant")
         try:
@@ -84,7 +76,6 @@ def fit_symbolic_to_probe(dim_values: np.ndarray, f_values: np.ndarray, mode: st
         ss_tot = np.sum((y - np.mean(y)) ** 2) + 1e-12
         r2 = float(1.0 - ss_res / ss_tot)
 
-        # pretty equation
         terms = []
         p = deg
         for a in coef:
@@ -168,12 +159,7 @@ def probe_pendulum(model, trajs_scaled: np.ndarray, device: str = "cpu"):
     theta_amp = float(fits["theta"]["coef"][0])
     ratio = float(theta_amp / (omega_quad + 1e-12))
 
-    summary = PendulumProbeSummary(
-        omega_quad=omega_quad,
-        theta_cos_amp=theta_amp,
-        ratio_amp_over_quad=ratio,
-    )
-    return probes, fits, summary
+    return probes, fits, PendulumProbeSummary(omega_quad, theta_amp, ratio)
 
 
 def plot_probes(probe_results, fits, env_name: str, save_dir: str = "figures"):
@@ -208,5 +194,4 @@ def plot_probes(probe_results, fits, env_name: str, save_dir: str = "figures"):
     out = os.path.join(save_dir, f"probe_{env_name}.png")
     fig.savefig(out)
     plt.close(fig)
-    print("Saved", out)
 

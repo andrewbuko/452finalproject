@@ -1,10 +1,4 @@
-"""
-Spring-mass system (simple harmonic oscillator).
-State: [x, v] - position and velocity
-ODE: dx/dt = v, dv/dt = -(k/m)*x
-Energy: E = 0.5*k*x^2 + 0.5*m*v^2
-With k=10, m=1: E = 5.0*x^2 + 0.5*v^2
-"""
+"""simple harmonic oscillator. state=[x,v], E = 0.5*k*x^2 + 0.5*m*v^2."""
 
 import json
 import os
@@ -54,7 +48,7 @@ def generate_spring_mass_data(
         }
         with open(os.path.join(save_dir, "params.json"), "w", encoding="utf-8") as f:
             json.dump(params, f, indent=2)
-        print(f"Saved {n_trajectories} spring-mass trajectories to {save_dir}")
+        print(f"  saved {n_trajectories} spring-mass trajectories -> {save_dir}")
 
     return trajectories
 

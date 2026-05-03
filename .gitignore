@@ -1,20 +1,25 @@
 venv/
 __pycache__/
 *.pyc
-.DS_Store
-*.egg-info/
-.ipynb_checkpoints/
 *.swp
-results/
-*.log
-julia_project/
-.SymbolicRegression.jl/
-outputs/
-scripts/__pycache__/
+*.egg-info/
+.DS_Store
+.ipynb_checkpoints/
+
+# big artifacts that shouldn't live in git
 data/**/*.npy
 models/**/*.pt
 models/**/*.npz
 models/**/*_history.npy
 figures/*.png
 figures/*.json
+
+# scratch/output dirs
+results/
 results_smoke/
+artifacts/
+logs/
+notebooks/
+outputs/
+julia_project/
+.SymbolicRegression.jl/

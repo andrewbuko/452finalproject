@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Master script: runs the entire experiment pipeline.
-Usage:
-  python scripts/run_all.py --device cuda --data_dir data --save_dir results
-On SLURM cluster:
-  sbatch cluster/submit_job.sh
-"""
+"""run the full experiment pipeline across all three environments."""
 
 import argparse
 import json
@@ -16,18 +10,12 @@ import time
 import numpy as np
 import torch
 
-# Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def main(args):
     device = torch.device(args.device)
-    print("=" * 70)
-    print("CONSERVATION DISCOVERY AND SYMBOLIC REGRESSION EXPERIMENT")
-    print(f"Device: {device}")
-    print(f"Data dir: {args.data_dir}")
-    print(f"Save dir: {args.save_dir}")
-    print("=" * 70)
+    print(f"device={device}  data={args.data_dir}  out={args.save_dir}")
 
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs("figures", exist_ok=True)
@@ -56,7 +44,6 @@ def main(args):
             "default_n": 1_000_000,
             "poly_degree": 2,
             "trig_dims": None,
-            # PySR discovers equations from operators (not a fixed polynomial library)
             "pysr_unary": ["square"],
             "pysr_binary": ["+", "-", "*", "/"],
             "generate": generate_projectile_data,
@@ -99,45 +86,31 @@ def main(args):
     coeff_errors = []
 
     for env in ENVIRONMENTS:
-        print("\n" + "#" * 70)
-        print(f"# ENVIRONMENT: {env['name'].upper()}")
-        print(f"# Known: {env['known']}")
-        print("#" * 70)
+        print(f"\n=== {env['name']} === (known: {env['known']})")
 
         env_dir = os.path.join(args.data_dir, env["name"])
         traj_path = os.path.join(env_dir, "trajectories.npy")
 
         n_traj = int(min(env["default_n"], args.n_trajectories))
 
-        # Phase 1: Data generation / load
         if (not os.path.exists(traj_path)) or args.regenerate:
-            print("Generating data...")
-            if env["name"] == "pendulum":
-                trajs = env["generate"](n_trajectories=n_traj, n_timesteps=args.n_timesteps, dt=args.dt, save_dir=env_dir)
-            else:
-                trajs = env["generate"](n_trajectories=n_traj, n_timesteps=args.n_timesteps, dt=args.dt, save_dir=env_dir)
+            trajs = env["generate"](n_trajectories=n_traj, n_timesteps=args.n_timesteps, dt=args.dt, save_dir=env_dir)
         else:
             trajs = np.load(traj_path)
-            print(f"Loaded {env['name']} data: {trajs.shape}")
-            # Respect --n_trajectories even when loading an existing dataset.
-            # (The on-disk dataset may contain many more trajectories.)
+            print(f"loaded {trajs.shape}")
+            # respect --n_trajectories even when the on-disk dataset is larger
             if trajs.shape[0] > n_traj:
                 trajs = trajs[:n_traj]
-                print(f"Subsampled {env['name']} to: {trajs.shape}")
 
-        # Optional noise ablation: add IID Gaussian noise to states.
         if args.noise_std and float(args.noise_std) > 0:
             rngn = np.random.RandomState(123)
             trajs = trajs + rngn.normal(scale=float(args.noise_std), size=trajs.shape).astype(trajs.dtype, copy=False)
 
-        # Sanity check: energy conservation of (possibly noisy) data
         E = env["energy"](trajs)
-        print(f"{env['name']} energy conservation: std={E.std(axis=1).mean():.2e}")
+        print(f"data energy std = {E.std(axis=1).mean():.2e}")
 
-        # Phase 2: CDN training on normalized data
-        print("Training CDN (normalized)...")
+        # CDN trains on min-max normalized trajectories.
         trajs_norm, stats = normalize_trajectories(trajs)
-        # Need a consistent split for both trajectories and energy0 alignment targets.
         rng = np.random.RandomState(42)
         nN = trajs_norm.shape[0]
         perm = rng.permutation(nN)
@@ -147,7 +120,6 @@ def main(args):
         energy0_train = E[train_idx, 0]
         shared_epochs = int(args.epochs_rest) if args.epochs_rest is not None else None
 
-        # CDN with alignment + scale constraints so f(s) correlates with analytical energy.
         cdn_cfg = CDNTrainConfig(
             env_name=env["name"],
             state_dim=env["state_dim"],
@@ -171,30 +143,20 @@ def main(args):
         )
         cdn, _ = train_cdn(trajs_train, cdn_cfg, energy0_np=energy0_train)
 
-        # Validate CDN: compare learned f(s) to analytical energy (on raw units)
         def energy_from_norm(t_norm):
             t_raw = t_norm * stats["range"] + stats["min"]
             return env["energy"](t_raw)
 
         cdn_val = validate_conservation_model(
-            cdn,
-            trajs_norm,
-            energy_from_norm,
-            env["name"],
-            model_name="CDN",
-            save_dir="figures",
-            device=device,
+            cdn, trajs_norm, energy_from_norm, env["name"],
+            model_name="CDN", save_dir="figures", device=device,
         )
         all_results[f"cdn_{env['name']}"] = cdn_val
 
-        # Phase 2b: Structured Energy Network baseline (optional)
         if args.run_structured_energy:
-            print("Training structured energy network (RAW)...")
             if env["name"] == "projectile":
                 pos_dims, vel_dims = [0, 1], [2, 3]
-            elif env["name"] == "pendulum":
-                pos_dims, vel_dims = [0], [1]
-            else:  # spring_mass
+            else:
                 pos_dims, vel_dims = [0], [1]
 
             structured_cfg = StructuredEnergyConfig(
@@ -209,20 +171,14 @@ def main(args):
             )
             structured_model, _ = train_structured_energy(trajs, energy0_np=E[:, 0], cfg=structured_cfg)
             structured_val = validate_conservation_model(
-                structured_model,
-                trajs,
-                env["energy"],
-                env["name"],
-                model_name="StructuredEnergy",
-                save_dir="figures",
-                device=device,
+                structured_model, trajs, env["energy"], env["name"],
+                model_name="StructuredEnergy", save_dir="figures", device=device,
             )
             all_results[f"structured_energy_{env['name']}"] = structured_val
         else:
             structured_model = None
 
-        # Phase 3: Polynomial model on RAW data (with energy alignment to pin scale)
-        print("Training polynomial model (RAW)...")
+        # polynomial CDN trains on raw (unnormalized) data so coefficients are physical
         energy0 = E[:, 0].astype(np.float32, copy=False)
         poly_model, poly_eq = train_polynomial_model(
             trajs,
@@ -246,27 +202,18 @@ def main(args):
         env_names.append(env["name"])
 
         poly_val = validate_conservation_model(
-            poly_model,
-            trajs,
-            env["energy"],
-            env["name"],
-            model_name="Polynomial",
-            save_dir="figures",
-            device=device,
+            poly_model, trajs, env["energy"], env["name"],
+            model_name="Polynomial", save_dir="figures", device=device,
         )
         all_results[f"poly_{env['name']}"] = poly_val
 
-        # Phase 4: Probing (Polynomial)
         probe = probe_all_dimensions(poly_model, trajs, env["var_names"], device=str(device))
         all_results[f"probe_{env['name']}"] = probe
 
-        # Phase 4c: Diffusion transition baseline (RAW -> rollout)
-        # Condition on CDN's learned invariant f(s) and apply manifold projection via StructuredEnergyNetwork (if enabled).
         if args.run_diffusion:
-            print("Training diffusion transition model (RAW -> rollout, conditioned on CDN f(s))...")
             trajs_train_raw, trajs_val_raw = train_val_split(trajs, val_fraction=0.1, seed=42)
 
-            # Build conditioning values for each transition state in the training set: c = f_cdn(s_t)
+            # condition diffusion on the cdn invariant f(s_t)
             cdn_device = next(cdn.parameters()).device
             cdn.eval()
             flat_raw = trajs_train_raw[:, :-1, :].reshape(-1, env["state_dim"]).astype(np.float32)
@@ -317,7 +264,6 @@ def main(args):
             )
             all_results[f"diffusion_{env['name']}"] = diff_metrics
 
-        # Phase 4b: SINDy (STLSQ) sparse regression baseline (optional)
         if args.run_sindy:
             flat = trajs.reshape(-1, env["state_dim"]).astype(np.float64)
             rng = np.random.RandomState(0)
@@ -325,8 +271,7 @@ def main(args):
             X = flat[rng.choice(flat.shape[0], size=n, replace=False)]
 
             def energy_on_states(X2d: np.ndarray) -> np.ndarray:
-                # X2d is (N, D). The env energy function expects (N, T, D),
-                # so treat each state as a length-1 trajectory.
+                # env energy expects (N, T, D); treat each state as a length-1 trajectory
                 X3d = X2d.reshape(-1, 1, env["state_dim"])
                 return env["energy"](X3d)[:, 0].reshape(-1)
 
@@ -337,11 +282,9 @@ def main(args):
                 cfg=STLSQConfig(threshold=float(args.sindy_threshold), max_iter=15, normalize_columns=True),
             )
             sindy_eq = format_sparse_equation(names_s, w_s, threshold=0.01)
-            print("\nSINDy (STLSQ) equation:")
-            print(" ", sindy_eq)
+            print(f"sindy: {sindy_eq}")
             all_results[f"sindy_{env['name']}"] = {"equation": sindy_eq, "weights": w_s.tolist(), "names": names_s}
 
-        # Phase 5: PySR (optional)
         if not args.skip_pysr:
             def target_energy(states_2d):
                 X3d = np.asarray(states_2d).reshape(-1, 1, env["state_dim"])
@@ -362,10 +305,8 @@ def main(args):
             )
             all_results[f"pysr_{env['name']}"] = pysr_best
 
-        # Placeholder coefficient error (computed robustly in hero_figure stage later)
         coeff_errors.append(0.0)
 
-    # Hero figure
     create_hero_figure(discovered_eqs, known_eqs, env_names, coeff_errors, save_dir="figures")
 
     elapsed = time.time() - start_time
@@ -373,16 +314,11 @@ def main(args):
     with open(os.path.join(args.save_dir, "experiment_results.json"), "w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=2, default=str)
 
-    print("=" * 70)
-    print(f"EXPERIMENT COMPLETE - {elapsed:.0f}s ({elapsed/60:.1f} min)")
-    print(f"Results saved to {args.save_dir}/experiment_results.json")
-    print("Figures saved to figures/")
-    print("Models saved to models/")
-    print("=" * 70)
+    print(f"done in {elapsed/60:.1f} min -> {args.save_dir}/experiment_results.json")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run full experiment")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--data_dir", type=str, default="data")
     parser.add_argument("--save_dir", type=str, default="results")
@@ -390,17 +326,12 @@ if __name__ == "__main__":
     parser.add_argument("--n_timesteps", type=int, default=200)
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--regenerate", action="store_true")
-    parser.add_argument("--noise_std", type=float, default=0.0, help="Add Gaussian noise to trajectories (ablation).")
+    parser.add_argument("--noise_std", type=float, default=0.0, help="add gaussian noise to trajectories (ablation)")
     parser.add_argument("--skip_pysr", action="store_true")
     parser.add_argument("--run_structured_energy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_sindy", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--run_diffusion", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument(
-        "--epochs_rest",
-        type=int,
-        default=512,
-        help="Epochs for non-CDN models (structured/polynomial/diffusion).",
-    )
+    parser.add_argument("--epochs_rest", type=int, default=512, help="epochs for non-cdn models")
 
     parser.add_argument("--cdn_epochs", type=int, default=100)
     parser.add_argument("--cdn_lambda_var", type=float, default=0.5)
@@ -426,7 +357,6 @@ if __name__ == "__main__":
     parser.add_argument("--sindy_samples", type=int, default=50000)
     parser.add_argument("--sindy_threshold", type=float, default=0.05)
 
-    # Diffusion transition baseline (trajectory rollouts)
     parser.add_argument("--diffusion_epochs", type=int, default=512)
     parser.add_argument("--diffusion_lr", type=float, default=2e-4)
     parser.add_argument("--diffusion_batch_size", type=int, default=4096)
@@ -438,4 +368,3 @@ if __name__ == "__main__":
     parser.add_argument("--diffusion_project_manifold", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--diffusion_project_steps", type=int, default=1)
     main(parser.parse_args())
-

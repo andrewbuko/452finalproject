@@ -1,15 +1,4 @@
-"""
-Projectile trajectory generation.
-Generates 2D projectile motion trajectories analytically (no simulator needed).
-State vector: [x, y, vx, vy] where x,y are position and vx,vy are velocity.
-Physics:
-  x(t) = vx0 * t
-  y(t) = vy0 * t - 0.5 * g * t^2
-  vx(t) = vx0
-  vy(t) = vy0 - g * t
-Conserved quantity (total energy):
-  E = 0.5 * (vx^2 + vy^2) + g * y   (with m=1)
-"""
+"""2d projectile trajectories. state=[x,y,vx,vy], energy = 0.5*(vx^2+vy^2) + g*y (m=1)."""
 
 import json
 import os
@@ -28,21 +17,7 @@ def generate_projectile_data(
     seed=42,
     save_dir=None,
 ):
-    """
-    Generate projectile trajectories analytically. Fully vectorized.
-    Args:
-      n_trajectories: number of trajectories to generate
-      n_timesteps: timesteps per trajectory
-      dt: time step in seconds
-      g: gravitational acceleration
-      m: mass (kept at 1.0 for simplicity)
-      v0_range: (min, max) initial speed
-      angle_range_deg: (min, max) launch angle in degrees
-      seed: random seed for reproducibility
-      save_dir: if provided, save data and params here
-    Returns:
-      trajectories: (n_trajectories, n_timesteps, 4) array [x, y, vx, vy]
-    """
+    """vectorized analytic generator. returns (n_trajectories, n_timesteps, 4)."""
     rng = np.random.RandomState(seed)
     v0 = rng.uniform(v0_range[0], v0_range[1], size=n_trajectories)
     angles = np.radians(rng.uniform(angle_range_deg[0], angle_range_deg[1], size=n_trajectories))
@@ -76,21 +51,13 @@ def generate_projectile_data(
         }
         with open(os.path.join(save_dir, "params.json"), "w", encoding="utf-8") as f:
             json.dump(params, f, indent=2)
-        print(f"Saved {n_trajectories} projectile trajectories to {save_dir}")
+        print(f"  saved {n_trajectories} projectile trajectories -> {save_dir}")
 
     return trajectories
 
 
 def compute_energy_projectile(trajectories: np.ndarray, g: float = 9.81, m: float = 1.0):
-    """
-    Analytical total energy:
-      E = 0.5*m*(vx^2 + vy^2) + m*g*y
-
-    Args:
-      trajectories: (N, T, 4) with [x, y, vx, vy]
-    Returns:
-      energy: (N, T)
-    """
+    """analytic energy 0.5*m*(vx^2+vy^2) + m*g*y. trajectories: (N,T,4) -> (N,T)."""
     y = trajectories[:, :, 1]
     vx = trajectories[:, :, 2]
     vy = trajectories[:, :, 3]

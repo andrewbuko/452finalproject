@@ -25,7 +25,7 @@ class DiffusionTrainConfig:
     device: Optional[str] = None
     save_dir: str = "models"
     log_every: int = 2
-    # If > 0, add extra conditioning dimension(s) to the diffusion model.
+    # if > 0, add extra conditioning dim(s) to the diffusion model
     cond_dim: int = 0
 
 
@@ -46,13 +46,7 @@ def _destandardize(trajs_z: np.ndarray, stats: Dict[str, np.ndarray]) -> np.ndar
 
 
 def build_transition_dataset(trajs_z: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Build (s_t, delta_t) pairs from standardized trajectories.
-    trajs_z: (N, T, D)
-    Returns:
-      s_t: (N*(T-1), D)
-      delta: (N*(T-1), D)
-    """
+    """build (s_t, delta) pairs from standardized trajectories. (N,T,D) -> (N*(T-1),D) each."""
     s_t = trajs_z[:, :-1, :].reshape(-1, trajs_z.shape[-1])
     delta = (trajs_z[:, 1:, :] - trajs_z[:, :-1, :]).reshape(-1, trajs_z.shape[-1])
     return s_t.astype(np.float32), delta.astype(np.float32)
@@ -63,13 +57,7 @@ def train_diffusion_transition(
     cfg: DiffusionTrainConfig,
     cond_np: Optional[np.ndarray] = None,
 ) -> Tuple[DiffusionTransitionModel, Dict[str, np.ndarray], Dict[str, list]]:
-    """
-    Train a diffusion transition model on one-step deltas (standardized).
-    Returns:
-      model (on cfg.device),
-      standardization stats computed from training subset only,
-      history dict
-    """
+    """train a ddpm transition model on standardized one-step deltas. returns (model, standardize_stats, history)."""
     if cfg.device is None:
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(cfg.device)
@@ -90,8 +78,7 @@ def train_diffusion_transition(
         cond_np = np.asarray(cond_np, dtype=np.float32)
         if cond_np.ndim == 1:
             cond_np = cond_np[:, None]
-        # If the caller computed cond_np for a larger dataset (e.g. before truncating to
-        # max_train_trajectories), trim to the exact number of transitions used here.
+        # caller may have computed cond_np over the full dataset; trim to the transitions we use here
         if cond_np.shape[0] > s_t_np.shape[0]:
             cond_np = cond_np[: s_t_np.shape[0], :]
         if cond_np.shape[0] != s_t_np.shape[0]:
@@ -117,7 +104,7 @@ def train_diffusion_transition(
     history = {"loss": []}
     best = float("inf")
 
-    print(f"Training diffusion transition ({cfg.env_name}) on {device} with {len(ds)} transitions")
+    print(f"training diffusion ({cfg.env_name}) on {device} with {len(ds)} transitions")
     for epoch in range(int(cfg.epochs)):
         model.train()
         total = 0.0
@@ -142,7 +129,7 @@ def train_diffusion_transition(
             np.savez(stats_path, mean=stats["mean"], std=stats["std"])
 
         if (epoch == 0) or ((epoch + 1) % max(1, int(cfg.log_every)) == 0):
-            print(f"[diffusion {cfg.env_name}] epoch {epoch+1:3d}/{cfg.epochs} loss={avg:.6f} best={best:.6f}")
+            print(f"  diffusion {cfg.env_name} ep {epoch+1:3d}/{cfg.epochs} loss={avg:.6f} best={best:.6f}")
 
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     return model, stats, history
@@ -160,13 +147,7 @@ def rollout_diffusion(
     project_steps: int = 1,
     project_eps: float = 1e-8,
 ) -> np.ndarray:
-    """
-    Rollout in standardized space then convert back to raw.
-    Args:
-      s0_raw: (B, D)
-    Returns:
-      traj_raw: (B, T, D)
-    """
+    """rollout in standardized space then convert back to raw. s0_raw (B,D) -> traj_raw (B,T,D)."""
     if device is None:
         device = str(next(model.parameters()).device)
     dev = torch.device(device)
@@ -201,7 +182,7 @@ def rollout_diffusion(
         std_t = torch.tensor(stats["std"], device=s_z.device)[None, :]
         s_raw = s_z * std_t + mean_t
 
-        # Project onto the level set energy_model(s)=H0 using first-order correction along grad.
+        # project onto the level set energy_model(s)=H0 with a first-order step along the gradient
         with torch.enable_grad():
             for _ in range(int(project_steps)):
                 s_raw = s_raw.detach().clone().requires_grad_(True)

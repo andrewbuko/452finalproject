@@ -1,10 +1,4 @@
-"""
-Polynomial Conservation Model.
-Linear combination of polynomial features trained with a conservation loss.
-The weights ARE the equation - no hidden layers, no activations.
-
-CRITICAL: Train on RAW UNNORMALIZED data. Otherwise coefficients are meaningless.
-"""
+"""linear model over a polynomial+trig basis. weights are the equation."""
 
 import itertools
 from collections import Counter
@@ -15,13 +9,7 @@ import torch.nn as nn
 
 
 class PolynomialConservation(nn.Module):
-    """
-    Learnable polynomial model for discovering conservation laws.
-    The model computes:
-      f(s) = sum_i w_i * phi_i(s)
-    where phi_i are polynomial basis functions up to given degree,
-    plus optional trigonometric features (cos, sin) for angular variables.
-    """
+    """f(s) = sum_i w_i * phi_i(s) over a fixed feature library. train on raw (unnormalized) data."""
 
     def __init__(self, state_dim, degree=2, include_trig_dims=None):
         super().__init__()
@@ -34,8 +22,6 @@ class PolynomialConservation(nn.Module):
 
         self.weights = nn.Parameter(torch.zeros(n_features, dtype=torch.float32))
         nn.init.normal_(self.weights, mean=0.0, std=0.01)
-
-        print(f"PolynomialConservation: {n_features} features, degree={self.degree}")
 
     def _build_feature_names(self, var_names=None):
         if var_names is None:
@@ -58,13 +44,6 @@ class PolynomialConservation(nn.Module):
         return names
 
     def _compute_features(self, s):
-        """
-        Expand state vector into polynomial + trig features.
-        Args:
-          s: (B, state_dim)
-        Returns:
-          features: (B, n_features)
-        """
         B = s.shape[0]
         feats = [torch.ones(B, 1, device=s.device)]
         feats.append(s)
@@ -98,15 +77,9 @@ class PolynomialConservation(nn.Module):
                 else:
                     terms.append(f"{weight:+.4f}*{name}")
         equation = " ".join(terms)
-        print("\nDISCOVERED EQUATION:")
-        print(f" f(s) = {equation}")
-        print("\nALL COEFFICIENTS:")
-        for name, weight in zip(self.feature_names, w):
-            marker = " <-- SIGNIFICANT" if abs(weight) > threshold else ""
-            print(f" {name:>20s}: {weight:+.6f}{marker}")
+        print(f"f(s) = {equation}")
         return equation
 
     def get_equation_dict(self):
         w = self.weights.detach().cpu().numpy()
         return {name: float(weight) for name, weight in zip(self.feature_names, w)}
-

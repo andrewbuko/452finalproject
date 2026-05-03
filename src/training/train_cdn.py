@@ -13,11 +13,7 @@ from src.models.cdn import ConservationDiscoveryNetwork
 
 
 def conservation_loss(model, trajectories, lambda_var=0.1, epsilon=1.0):
-    """
-    Compute conservation loss.
-    Temporal consistency: f(s_t) ~= f(s_{t+1})
-    Variance regularizer: avoid trivial constant outputs
-    """
+    """temporal consistency loss with a hinge variance floor to avoid f(s)=const."""
     B, T, D = trajectories.shape
     states = trajectories.reshape(B * T, D)
     f_vals = model(states).reshape(B, T)
@@ -42,10 +38,7 @@ def train_conservation_model(
     device=None,
     model_name="model",
 ):
-    """
-    Train any conservation model (CDN or PolynomialConservation).
-    trajectories_np is normalized for CDN, RAW for polynomial.
-    """
+    """generic trainer for cdn/polynomial conservation models. expects normalized data for cdn, raw for poly."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -115,7 +108,7 @@ class CDNTrainConfig:
     lambda_scale: float = 0.0
     target_mean: float = 0.0
     target_std: float = 1.0
-    # "safe band" for std: no penalty inside [std_min, std_max]
+    # safe band for std: no penalty inside [std_min, std_max]
     std_min: float = 0.8
     std_max: float = 1.2
     lambda_align: float = 0.0
@@ -140,14 +133,7 @@ def cdn_loss(
     std_max: float = 1.2,
     lambda_align: float = 0.0,
 ):
-    """
-    Loss = temporal consistency + variance regularizer to avoid trivial constant output.
-
-    Args:
-      trajectories: (B, T, D)
-    Returns:
-      total_loss (Tensor), consistency_loss (float), variance (float)
-    """
+    """conservation loss + optional scale/alignment terms. trajectories: (B,T,D)."""
     B, T, D = trajectories.shape
     states = trajectories.reshape(B * T, D)
     f_vals = model(states).reshape(B, T)
@@ -160,29 +146,23 @@ def cdn_loss(
 
     var_floor = torch.as_tensor(epsilon, device=variance.device, dtype=variance.dtype)
     if var_reg == "hinge":
-        # Hinge: zero once variance is above epsilon.
         var_penalty = torch.relu(var_floor - variance) / (var_floor + 1e-8)
     elif var_reg == "softplus":
-        # Soft clamp: smooth version of hinge to avoid hard kinks.
-        # softplus(k*(eps - var))/k ≈ relu(eps-var) for large k
+        # smooth hinge: softplus(k*(eps-var))/k ~= relu(eps-var) for large k
         k = 10.0
         var_penalty = F.softplus(k * (var_floor - variance)) / k / (var_floor + 1e-8)
     else:
-        raise ValueError(f"Unknown var_reg: {var_reg}")
+        raise ValueError(f"unknown var_reg: {var_reg}")
 
     total = consistency + lambda_var * var_penalty
 
-    # Optional: keep the learned invariant's scale well-behaved.
-    # Without this, the network can satisfy "conserved" while its output
-    # drifts to huge magnitudes (high variance) because the scale is unconstrained.
+    # without a scale constraint the net can drift to huge magnitudes while still being "conserved"
     scale_loss = torch.zeros((), device=f_initial.device, dtype=f_initial.dtype)
     if lambda_scale and lambda_scale > 0:
         mean = f_initial.mean()
         std = torch.sqrt(variance + 1e-8)
         tm = torch.as_tensor(target_mean, device=f_initial.device, dtype=f_initial.dtype)
-        # Mean penalty (soft): keep near target_mean.
         mean_loss = (mean - tm) ** 2
-        # Std penalty (hinge band): no penalty if std in [std_min, std_max]
         smin = torch.as_tensor(std_min, device=f_initial.device, dtype=f_initial.dtype)
         smax = torch.as_tensor(std_max, device=f_initial.device, dtype=f_initial.dtype)
         std_low = torch.relu(smin - std)
@@ -192,9 +172,7 @@ def cdn_loss(
         total = total + lambda_scale * scale_loss
 
     if energy0 is not None and lambda_align > 0:
-        # Align the *scale* of the discovered invariant to analytical energy at t=0.
-        # This breaks the "any monotone transform of energy" ambiguity while keeping
-        # the primary objective conservation-based.
+        # align the invariant scale to analytical energy at t=0; breaks the affine ambiguity
         e0 = energy0.to(f_initial.device).float()
         fz = (f_initial - f_initial.mean()) / (f_initial.std(unbiased=False) + 1e-8)
         ez = (e0 - e0.mean()) / (e0.std(unbiased=False) + 1e-8)
@@ -212,7 +190,7 @@ def train_cdn(trajectories_np: np.ndarray, cfg: CDNTrainConfig, energy0_np: Opti
     if cfg.device is None:
         cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = cfg.device
-    print(f"Training CDN ({cfg.env_name}) on {device}")
+    print(f"training cdn ({cfg.env_name}) on {device}")
 
     trajs_tensor = torch.tensor(trajectories_np, dtype=torch.float32)
     if energy0_np is None:
@@ -288,13 +266,12 @@ def train_cdn(trajectories_np: np.ndarray, cfg: CDNTrainConfig, energy0_np: Opti
 
         if ((epoch + 1) % max(1, cfg.log_every) == 0) or epoch == 0:
             print(
-                f"Epoch {epoch+1:3d}/{cfg.epochs} "
-                f"Loss: {avg_loss:.6f}  Consistency: {avg_cons:.6f}  "
-                f"Variance: {avg_var:.4f}  ScaleLoss: {avg_scale:.6f}"
+                f"  ep {epoch+1:3d}/{cfg.epochs} "
+                f"loss={avg_loss:.6f} cons={avg_cons:.6f} var={avg_var:.4f} scale={avg_scale:.6f}"
             )
             if cfg.log_grad_norm and cfg.grad_clip is not None:
                 try:
-                    print(f"  (last step) grad_norm_before_clip: {float(total_norm):.4f}")
+                    print(f"    grad_norm_before_clip={float(total_norm):.4f}")
                 except Exception:
                     pass
 

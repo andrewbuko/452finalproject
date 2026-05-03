@@ -1,11 +1,4 @@
-"""
-Structured Energy Network baseline.
-
-Learn a conserved quantity with an inductive bias:
-  H(s) = T(v) + V(q)
-where T depends only on velocity-like dimensions and V only on position-like
-dimensions. This is a strong physics prior for many mechanical systems.
-"""
+"""H(q,v) = T(v) + V(q) with separate mlps for T and V."""
 
 from __future__ import annotations
 
@@ -28,10 +21,6 @@ def _make_mlp(in_dim: int, hidden_dim: int, n_layers: int, activation: str) -> n
 
 
 class StructuredEnergyNetwork(nn.Module):
-    """
-    H(s) = T(v_dims) + V(q_dims)
-    """
-
     def __init__(
         self,
         state_dim: int,
@@ -55,10 +44,9 @@ class StructuredEnergyNetwork(nn.Module):
 
     def forward(self, s: torch.Tensor) -> torch.Tensor:
         if s.shape[-1] != self.state_dim:
-            raise ValueError(f"Expected last dim {self.state_dim}, got {s.shape[-1]}")
+            raise ValueError(f"expected last dim {self.state_dim}, got {s.shape[-1]}")
         q = s[..., self.pos_dims]
         v = s[..., self.vel_dims]
         T = self.T_net(v).squeeze(-1)
         V = self.V_net(q).squeeze(-1)
         return T + V
-

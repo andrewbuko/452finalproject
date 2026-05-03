@@ -1,10 +1,4 @@
-"""
-Training script specifically for the polynomial conservation model.
-KEY DIFFERENCE FROM CDN TRAINING:
-- Uses RAW UNNORMALIZED trajectory data
-- Lower learning rate (few parameters, we want precision)
-- Prints the discovered equation after training
-"""
+"""trainer for the polynomial conservation model. uses raw (unnormalized) data so coefficients are physical."""
 
 import os
 
@@ -37,7 +31,7 @@ def train_polynomial_model(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Auto-set epsilon based on initial-state energy variance on a subset.
+    # heuristic epsilon from initial-state energy variance on a subset
     if epsilon is None:
         x = raw_trajectories_np[:5000]
         if state_dim == 4:
@@ -47,14 +41,13 @@ def train_polynomial_model(
         else:
             E = 0.5 * x[:, 0, 1] ** 2
         epsilon = max(float(E.var() * 0.1), 1.0)
-        print(f"Auto epsilon = {epsilon:.2f}")
 
     model = PolynomialConservation(state_dim=state_dim, degree=degree, include_trig_dims=include_trig_dims).to(device)
 
     save_path = os.path.join(save_dir, f"polynomial_{env_name}_best.pt")
     os.makedirs(save_dir, exist_ok=True)
 
-    # For very large datasets, we don't need all trajectories to fit 15-20 weights.
+    # 15-20 weights doesn't need millions of trajectories
     max_train = min(len(raw_trajectories_np), 200_000)
     train_data = raw_trajectories_np[:max_train].astype(np.float32, copy=False)
 
@@ -88,8 +81,7 @@ def train_polynomial_model(
             opt.zero_grad(set_to_none=True)
             loss, _, _ = conservation_loss(model, batch_traj, lambda_var=lambda_var, epsilon=epsilon)
 
-            # Energy alignment term pins the scale/offset so coefficients are in physical units.
-            # Without this, any affine transform of a conserved quantity is also conserved.
+            # alignment pins the affine scale; otherwise any rescaled-conserved is still conserved
             if (batch_e0 is not None) and (lambda_energy is not None) and (lambda_energy > 0):
                 B, T, D = batch_traj.shape
                 f0 = model(batch_traj[:, 0, :].reshape(B, D))
@@ -109,13 +101,11 @@ def train_polynomial_model(
             torch.save(model.state_dict(), save_path)
 
         if (epoch + 1) % 200 == 0:
-            print(f"[poly {env_name}] epoch {epoch+1}/{epochs} loss={avg_loss:.8f} best={best_loss:.8f}")
+            print(f"  poly {env_name} ep {epoch+1}/{epochs} loss={avg_loss:.8f} best={best_loss:.8f}")
             model.print_equation(var_names=var_names, threshold=0.005)
 
     model.load_state_dict(torch.load(save_path, map_location=device))
-    print("\n============================================================")
-    print(f"FINAL EQUATION - {env_name.upper()}")
-    print("============================================================")
+    print(f"poly {env_name} final equation:")
     equation = model.print_equation(var_names=var_names, threshold=0.005)
     return model, equation
 
